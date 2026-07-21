@@ -51,7 +51,12 @@ class StoreAccessRequestRequest extends FormRequest
             'duration_minutes' => ['required', 'integer', Rule::in(config('dbvault.available_durations', [15, 30, 60, 120, 240]))],
             'reason' => ['required', 'string', 'max:2000'],
             'grants' => ['required', 'array', 'min:1'],
-            'grants.*.table' => ['required', 'string', 'max:64'],
+            // Table/column names are eventually interpolated into GRANT SQL on
+            // the privileged admin connection (ProvisionerService::buildGrantSql).
+            // Constrain them to plain SQL identifiers at the boundary so a
+            // crafted name is rejected here, not deep in the provisioner.
+            'grants.*.table' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9_$]+$/'],
+            'grants.*.column' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_$]+$/'],
             'grants.*.privileges' => ['required', 'array', 'min:1'],
             // Case-insensitively constrain each privilege to the allowed set;
             // forbidden privileges fail here and again, by name, in

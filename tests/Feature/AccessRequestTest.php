@@ -57,6 +57,25 @@ class AccessRequestTest extends TestCase
         $this->assertSame(0, AccessRequest::count());
     }
 
+    public function test_a_request_with_a_non_identifier_table_name_is_rejected(): void
+    {
+        $developer = $this->makeUser('developer');
+
+        // A crafted table name must be rejected at the boundary so it never
+        // reaches the grant-SQL builder on the admin connection.
+        $this->actingAs($developer, 'vault')->postJson('/vault/api/requests', [
+            'target_database' => 'appdb',
+            'duration_minutes' => 60,
+            'reason' => 'Attempting identifier injection through the table name',
+            'grants' => [
+                ['table' => "orders` ON *.* TO 'x'@'%'; -- ", 'privileges' => ['select']],
+            ],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['grants.0.table']);
+
+        $this->assertSame(0, AccessRequest::count());
+    }
+
     public function test_a_request_against_a_disallowed_database_is_rejected(): void
     {
         $developer = $this->makeUser('developer');

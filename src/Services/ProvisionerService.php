@@ -210,6 +210,11 @@ class ProvisionerService
         $forbidden = array_map('strtoupper', config('dbvault.forbidden_privileges'));
         $allowed = array_map('strtoupper', config('dbvault.allowed_privileges'));
 
+        // Validate the target database name up front: it is interpolated into
+        // every GRANT statement below, so a name that isn't a plain identifier
+        // must be refused rather than escaped-and-trusted.
+        $this->assertSafeIdentifier($targetDatabase, 'database');
+
         foreach ($grants as $grant) {
             $privilege = strtoupper($grant->privilege instanceof Privilege
                 ? $grant->privilege->value
@@ -225,6 +230,16 @@ class ProvisionerService
                 throw new InvalidArgumentException(
                     "Refusing to build grant SQL: '{$privilege}' is not in the allowed privilege set."
                 );
+            }
+
+            // Table and column names flow from the access request into GRANT
+            // SQL executed on the ADMIN connection. Refuse structurally if they
+            // are not plain identifiers — this is the last line of defence
+            // against second-order SQL injection through a crafted request.
+            $this->assertSafeIdentifier((string) $grant->table_name, 'table');
+
+            if ($grant->column_name !== null && $grant->column_name !== '') {
+                $this->assertSafeIdentifier((string) $grant->column_name, 'column');
             }
         }
 
@@ -249,7 +264,7 @@ class ProvisionerService
                 ->implode(', ');
 
             $object = $column
-                ? sprintf('%s (%s)', $this->qualifyTable($targetDatabase, $table), $column)
+                ? sprintf('%s (%s)', $this->qualifyTable($targetDatabase, $table), $this->escapeIdentifier($column))
                 : $this->qualifyTable($targetDatabase, $table);
 
             $statements[] = sprintf(
@@ -280,6 +295,34 @@ class ProvisionerService
 
     protected function qualifyTable(string $database, string $table): string
     {
-        return sprintf('`%s`.`%s`', $database, $table);
+        return sprintf('%s.%s', $this->escapeIdentifier($database), $this->escapeIdentifier($table));
+    }
+
+    /**
+     * Reject any identifier that is not a plain [A-Za-z0-9_$] token. Used for
+     * the database/table/column names interpolated into GRANT statements run
+     * on the privileged admin connection. Throwing (rather than escaping and
+     * proceeding) keeps a crafted request from ever producing admin SQL — the
+     * structural refusal the package guarantees for forbidden privileges is
+     * extended here to object names.
+     */
+    protected function assertSafeIdentifier(string $name, string $kind): void
+    {
+        if ($name === '' || preg_match('/^[A-Za-z0-9_$]+$/', $name) !== 1) {
+            throw new InvalidArgumentException(
+                "Refusing to build grant SQL: {$kind} name '{$name}' is not a valid identifier."
+            );
+        }
+    }
+
+    /**
+     * Backtick-quote an identifier, doubling any embedded backtick per the
+     * MySQL rule. Defence-in-depth: callers already assertSafeIdentifier(), so
+     * a backtick should never reach here, but escaping means a missed call
+     * still cannot break out of the quotes.
+     */
+    protected function escapeIdentifier(string $name): string
+    {
+        return '`'.str_replace('`', '``', $name).'`';
     }
 }

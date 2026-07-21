@@ -111,6 +111,17 @@ class InstallCommand extends Command
             return false;
         }
 
+        // The database name is interpolated into a CREATE DATABASE statement
+        // (identifiers cannot be bound as parameters). Reject anything that is
+        // not a plain identifier rather than silently mangling it — creating a
+        // differently-named database than intended would be a subtle, and for
+        // an access-broker unacceptable, failure.
+        if (! $this->isSafeIdentifier((string) $database)) {
+            $this->components->error("Refusing to auto-create vault database \"{$database}\": the name must match ^[A-Za-z0-9_]+$. Create it manually or rename it.");
+
+            return false;
+        }
+
         try {
             // Test whether the database is already reachable.
             DB::connection('dbvault')->getPdo();
@@ -137,13 +148,19 @@ class InstallCommand extends Command
         Config::set('database.connections.'.$bootstrapName, $bootstrapConfig);
 
         try {
+            // $database is validated as ^[A-Za-z0-9_]+$ above, so it is safe to
+            // quote and interpolate. charset/collation come from connection
+            // config; whitelist them defensively before interpolation since
+            // identifiers/keywords cannot be bound as query parameters.
             $quoted = $this->quoteIdentifier($database, $driver);
-            $charset = $config['charset'] ?? 'utf8mb4';
-            $collation = $config['collation'] ?? 'utf8mb4_unicode_ci';
 
-            $sql = $driver === 'pgsql'
-                ? "CREATE DATABASE {$quoted}"
-                : "CREATE DATABASE IF NOT EXISTS {$quoted} CHARACTER SET {$charset} COLLATE {$collation}";
+            $sql = "CREATE DATABASE {$quoted}";
+
+            if ($driver !== 'pgsql') {
+                $charset = $this->safeToken($config['charset'] ?? 'utf8mb4', 'utf8mb4');
+                $collation = $this->safeToken($config['collation'] ?? 'utf8mb4_unicode_ci', 'utf8mb4_unicode_ci');
+                $sql = "CREATE DATABASE IF NOT EXISTS {$quoted} CHARACTER SET {$charset} COLLATE {$collation}";
+            }
 
             DB::connection($bootstrapName)->statement($sql);
             DB::purge($bootstrapName);
@@ -169,12 +186,27 @@ class InstallCommand extends Command
             || str_contains($message, 'does not exist');
     }
 
+    /**
+     * A plain SQL identifier: letters, digits, underscores only.
+     */
+    protected function isSafeIdentifier(string $name): bool
+    {
+        return $name !== '' && preg_match('/^[A-Za-z0-9_]+$/', $name) === 1;
+    }
+
+    /**
+     * Whitelist a charset/collation token, falling back to a safe default when
+     * the configured value contains anything unexpected.
+     */
+    protected function safeToken(string $value, string $fallback): string
+    {
+        return preg_match('/^[A-Za-z0-9_]+$/', $value) === 1 ? $value : $fallback;
+    }
+
     protected function quoteIdentifier(string $name, string $driver): string
     {
-        // Strip anything that isn't a safe identifier char, then quote.
-        $safe = preg_replace('/[^A-Za-z0-9_]/', '', $name);
-
-        return $driver === 'mysql' ? "`{$safe}`" : "\"{$safe}\"";
+        // $name is pre-validated by isSafeIdentifier(); quote per driver.
+        return $driver === 'mysql' ? "`{$name}`" : "\"{$name}\"";
     }
 
     protected function runMigrations(): bool
