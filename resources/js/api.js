@@ -8,9 +8,9 @@ export const basePath = bootstrap.basePath ?? '/vault';
 export const apiBase = bootstrap.apiBase ?? '/vault/api';
 
 // Session-cookie auth: withCredentials sends the app's session cookie on
-// every request, and the CSRF token from the boot payload guards mutating
-// requests the same way Laravel's default `VerifyCsrfToken` middleware
-// expects (mirrors what Fortify/Sanctum SPA auth needs without Inertia).
+// every request, and the CSRF token guards mutating requests the same way
+// Laravel's default `VerifyCsrfToken` middleware expects (mirrors what
+// Fortify/Sanctum SPA auth needs without Inertia).
 export const apiClient = axios.create({
     baseURL: apiBase,
     withCredentials: true,
@@ -21,17 +21,49 @@ export const apiClient = axios.create({
         // 302 redirect — without it the SPA can't read validation messages
         // and shows a generic "could not submit" for every failure.
         Accept: 'application/json',
-        'X-CSRF-TOKEN': bootstrap.csrf ?? '',
     },
 });
 
+// The CSRF token last handed to us — from the Blade boot page initially, then
+// refreshed via setCsrfToken() whenever the backend rotates the session
+// (login/logout return the new token in their JSON payload). This is the
+// fallback source; the live XSRF-TOKEN cookie (below) takes precedence.
+let currentCsrfToken = bootstrap.csrf ?? '';
+
 /**
- * Update the CSRF header, e.g. after the backend rotates the token on
- * login/logout.
+ * Read the value of a browser cookie by name (URL-decoded), or null.
+ */
+function readCookie(name) {
+    if (typeof document === 'undefined') return null;
+    const match = document.cookie.match(
+        new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)')
+    );
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Update the fallback CSRF token, e.g. after the backend rotates it on
+ * login/logout. The XSRF-TOKEN cookie is still preferred when present.
  */
 export function setCsrfToken(token) {
-    apiClient.defaults.headers['X-CSRF-TOKEN'] = token ?? '';
+    currentCsrfToken = token ?? '';
 }
+
+// Resolve the CSRF token FRESH on every mutating request. Laravel refreshes
+// the encrypted `XSRF-TOKEN` cookie on every response, so reading it here
+// keeps us in sync across session rotations (login regenerates the token) —
+// the root cause of the intermittent "CSRF token mismatch" after login. We
+// fall back to the last-known token (boot page / setCsrfToken) when the
+// cookie is unavailable.
+apiClient.interceptors.request.use((config) => {
+    const cookieToken = readCookie('XSRF-TOKEN');
+    if (cookieToken) {
+        config.headers['X-XSRF-TOKEN'] = cookieToken;
+    } else if (currentCsrfToken) {
+        config.headers['X-CSRF-TOKEN'] = currentCsrfToken;
+    }
+    return config;
+});
 
 // ---------------------------------------------------------------------
 // Typed endpoint helpers — one function per API contract entry. Every

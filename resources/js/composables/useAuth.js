@@ -18,6 +18,8 @@ function applyMe(data) {
     state.server = data?.server ?? { label: '' };
     state.counts = data?.counts ?? { pendingApprovals: 0, activeSessions: 0 };
     state.loaded = true;
+    // Keep the CSRF token in sync with the session on every /me refresh.
+    if (data?.csrf) setCsrfToken(data.csrf);
 }
 
 function clear() {
@@ -67,6 +69,9 @@ export function useAuth() {
 
     async function login(credentials) {
         const data = await authApi.login(credentials);
+        // The session (and CSRF token) is rotated on login; adopt the fresh
+        // token the backend returns so the next mutation isn't rejected.
+        if (data.csrf) setCsrfToken(data.csrf);
         if (data.status === 'authenticated') {
             await fetchMe({ force: true });
         }
@@ -75,6 +80,7 @@ export function useAuth() {
 
     async function verifyTwoFactor(payload) {
         const data = await authApi.twoFactorChallenge(payload);
+        if (data.csrf) setCsrfToken(data.csrf);
         if (data.status === 'authenticated') {
             await fetchMe({ force: true });
         }
@@ -83,10 +89,12 @@ export function useAuth() {
 
     async function logout() {
         try {
-            await authApi.logout();
+            const data = await authApi.logout();
+            // Session was invalidated + token regenerated; keep the fresh
+            // token so a subsequent login POST validates.
+            if (data?.csrf) setCsrfToken(data.csrf);
         } finally {
             clear();
-            setCsrfToken('');
         }
     }
 

@@ -112,7 +112,12 @@ class AuthController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return response()->json(['status' => 'ok']);
+        // Hand the SPA the post-logout token so a subsequent login POST
+        // carries a token that matches the freshly-rotated session.
+        return response()->json([
+            'status' => 'ok',
+            'csrf' => $request->session()->token(),
+        ]);
     }
 
     public function me(Request $request): JsonResponse
@@ -130,6 +135,9 @@ class AuthController extends Controller
                 'pendingApprovals' => AccessRequest::where('status', RequestStatus::PendingApproval)->count(),
                 'activeSessions' => DbSession::where('status', SessionStatus::Active)->count(),
             ],
+            // Current CSRF token, so the SPA can re-sync after the session
+            // was rotated on login (see completeLogin()).
+            'csrf' => $request->session()->token(),
         ]);
     }
 
@@ -150,6 +158,9 @@ class AuthController extends Controller
         return response()->json([
             'status' => 'authenticated',
             'user' => (new UserResource($user->loadMissing('roles')))->resolve($request),
+            // The session token was just rotated by regenerate(); return it so
+            // the SPA replaces its stale boot token before the next mutation.
+            'csrf' => $request->session()->token(),
         ]);
     }
 }
