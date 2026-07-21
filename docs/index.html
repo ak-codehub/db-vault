@@ -221,22 +221,39 @@ DbVault\Models\Device::create([
 #   chmod +x install-phpmyadmin.sh
 #   sudo ./install-phpmyadmin.sh
 #
-# Configure via env vars (all have sensible defaults):
+# Configure via env vars:
 #   PMA_VERSION        phpMyAdmin release        (default 5.2.2)
 #   PMA_DIR            install target dir         (default /var/www/phpmyadmin)
 #   PMA_PORT           port for the built-in dev server (default 8080; 0 = skip serving)
-#   VAULT_EXCHANGE_URL vault token-exchange endpoint
-#                        (default http://127.0.0.1:8000/vault/api/sessions/exchange)
+#   VAULT_EXCHANGE_URL vault token-exchange endpoint. This is where signon.php
+#                        calls the VAULT (server-to-server) — it is the URL of
+#                        your Laravel app, NOT of phpMyAdmin, and NOT the port
+#                        this script serves phpMyAdmin on. REQUIRED — no default,
+#                        because a wrong value here is the #1 setup failure.
+#                        Use the app&#x27;s real URL (the one it is served at), e.g.
+#                          https://oms.example.com/vault/api/sessions/exchange
+#                        Point it at the app&#x27;s stable web server (nginx/apache),
+#                        NOT a `php artisan serve` dev server: that process reads
+#                        .env once at boot, so it serves a STALE signon secret
+#                        after you add DBVAULT_SIGNON_SECRET → 403 at exchange.
 #   VAULT_SIGNON_SECRET shared secret; MUST equal DBVAULT_SIGNON_SECRET in the
 #                        vault host app&#x27;s .env  (default: generated &amp; printed)
+#   VAULT_INSECURE_TLS  set to 1 ONLY for local/self-signed TLS (e.g. *.local):
+#                        disables cert verification in signon.php&#x27;s curl call.
+#                        Leave unset in production. (default: 0)
+#   VAULT_RESOLVE       optional curl --resolve entry &quot;host:port:ip&quot; so the PHP
+#                        process reaches the vault vhost without a DNS/hosts
+#                        entry, e.g. &quot;oms.local:443:127.0.0.1&quot;. (default: none)
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
 PMA_VERSION=&quot;${PMA_VERSION:-5.2.2}&quot;
 PMA_DIR=&quot;${PMA_DIR:-/var/www/phpmyadmin}&quot;
 PMA_PORT=&quot;${PMA_PORT:-8080}&quot;
-VAULT_EXCHANGE_URL=&quot;${VAULT_EXCHANGE_URL:-http://127.0.0.1:8000/vault/api/sessions/exchange}&quot;
+VAULT_EXCHANGE_URL=&quot;${VAULT_EXCHANGE_URL:-}&quot;
 VAULT_SIGNON_SECRET=&quot;${VAULT_SIGNON_SECRET:-$(head -c 24 /dev/urandom | base64 | tr -dc &#x27;A-Za-z0-9&#x27; | head -c 32)}&quot;
+VAULT_INSECURE_TLS=&quot;${VAULT_INSECURE_TLS:-0}&quot;
+VAULT_RESOLVE=&quot;${VAULT_RESOLVE:-}&quot;
 
 say() { printf &#x27;\033[1;36m==&gt;\033[0m %s\n&#x27; &quot;$1&quot;; }
 die() { printf &#x27;\033[1;31mERROR:\033[0m %s\n&#x27; &quot;$1&quot; &gt;&amp;2; exit 1; }
@@ -244,6 +261,13 @@ die() { printf &#x27;\033[1;31mERROR:\033[0m %s\n&#x27; &quot;$1&quot; &gt;&amp;
 command -v php  &gt;/dev/null || die &quot;php is required.&quot;
 command -v curl &gt;/dev/null || die &quot;curl is required.&quot;
 command -v unzip &gt;/dev/null || die &quot;unzip is required.&quot;
+
+if [ -z &quot;$VAULT_EXCHANGE_URL&quot; ]; then
+  die &quot;VAULT_EXCHANGE_URL is required. Set it to your app&#x27;s real token-exchange URL,
+       e.g. VAULT_EXCHANGE_URL=https://your-app.example.com/vault/api/sessions/exchange
+       (this is the VAULT/Laravel app URL — not phpMyAdmin, not the serve port).
+       Use the app&#x27;s stable nginx/apache URL, not a &#x27;php artisan serve&#x27; port.&quot;
+fi
 
 say &quot;Downloading phpMyAdmin ${PMA_VERSION}...&quot;
 tmp=&quot;$(mktemp -d)&quot;
@@ -276,6 +300,21 @@ declare(strict_types=1);
 @mkdir(\$cfg[&#x27;TempDir&#x27;], 0700, true);
 PHP
 
+# Build the optional curl lines only when requested, so production installs
+# don&#x27;t carry insecure/local-only options.
+EXTRA_CURL=&quot;&quot;
+if [ &quot;$VAULT_INSECURE_TLS&quot; = &quot;1&quot; ]; then
+  EXTRA_CURL=&quot;${EXTRA_CURL}
+    // Local only (VAULT_INSECURE_TLS=1): self-signed TLS, verification off.
+    CURLOPT_SSL_VERIFYPEER =&gt; false,
+    CURLOPT_SSL_VERIFYHOST =&gt; false,&quot;
+fi
+if [ -n &quot;$VAULT_RESOLVE&quot; ]; then
+  EXTRA_CURL=&quot;${EXTRA_CURL}
+    // Pin the vault host so the PHP process needs no DNS/hosts entry.
+    CURLOPT_RESOLVE =&gt; [&#x27;${VAULT_RESOLVE}&#x27;],&quot;
+fi
+
 say &quot;Writing signon.php (token exchange bridge)...&quot;
 cat &gt; &quot;$PMA_DIR/signon.php&quot; &lt;&lt;PHP
 &lt;?php
@@ -294,10 +333,21 @@ if (\$token === &#x27;&#x27;) { http_response_code(400); exit(&#x27;Missing sign
 curl_setopt_array(\$ch, [
     CURLOPT_POST =&gt; true, CURLOPT_RETURNTRANSFER =&gt; true, CURLOPT_TIMEOUT =&gt; 10,
     CURLOPT_HTTPHEADER =&gt; [&#x27;Content-Type: application/json&#x27;,&#x27;Accept: application/json&#x27;,&#x27;X-DbVault-Signon: &#x27;.VAULT_SIGNON_SECRET],
-    CURLOPT_POSTFIELDS =&gt; json_encode([&#x27;token&#x27; =&gt; \$token]),
+    CURLOPT_POSTFIELDS =&gt; json_encode([&#x27;token&#x27; =&gt; \$token]),${EXTRA_CURL}
 ]);
-\$body = curl_exec(\$ch); \$status = curl_getinfo(\$ch, CURLINFO_HTTP_CODE); curl_close(\$ch);
-if (\$status !== 200) { http_response_code(403); exit(&#x27;This session is no longer valid. Return to DB Vault and launch again.&#x27;); }
+\$body = curl_exec(\$ch); \$status = curl_getinfo(\$ch, CURLINFO_HTTP_CODE); \$curlErr = curl_error(\$ch); curl_close(\$ch);
+
+// Distinguish the failure modes so a misconfiguration is diagnosable instead
+// of always showing the same &quot;session no longer valid&quot; message:
+//   0   -&gt; could not reach the vault (wrong VAULT_EXCHANGE_URL / DNS / TLS)
+//   403 -&gt; shared secret mismatch (VAULT_SIGNON_SECRET != app DBVAULT_SIGNON_SECRET)
+//   404/410 -&gt; token invalid, already used, expired, or session not active
+if (\$status !== 200) {
+    http_response_code(\$status === 0 ? 502 : \$status);
+    if (\$status === 0)   { exit(&#x27;Could not reach the vault at &#x27;.VAULT_EXCHANGE_URL.&#x27; (&#x27;.\$curlErr.&#x27;). Check VAULT_EXCHANGE_URL / DNS / TLS.&#x27;); }
+    if (\$status === 403) { exit(&#x27;Signon secret mismatch: VAULT_SIGNON_SECRET here must equal DBVAULT_SIGNON_SECRET in the vault app .env (then clear its config cache / restart the web process).&#x27;); }
+    exit(&#x27;This session is no longer valid (HTTP &#x27;.\$status.&#x27;). Return to DB Vault and launch again.&#x27;);
+}
 
 \$cred = json_decode((string) \$body, true);
 \$_SESSION[&#x27;PMA_single_signon_user&#x27;]      = \$cred[&#x27;username&#x27;];
@@ -312,10 +362,17 @@ PHP
 
 say &quot;Done. phpMyAdmin installed at ${PMA_DIR}&quot;
 echo
-echo &quot;  Signon secret (put this in the vault host .env as DBVAULT_SIGNON_SECRET):&quot;
+echo &quot;  Next, in the VAULT host app&#x27;s .env, set BOTH of these and then run&quot;
+echo &quot;  \`php artisan config:clear\` (and restart the web process if it caches env):&quot;
+echo
+echo &quot;      # must byte-for-byte equal the secret baked into ${PMA_DIR}/signon.php&quot;
 echo &quot;      DBVAULT_SIGNON_SECRET=${VAULT_SIGNON_SECRET}&quot;
-echo &quot;  And point the vault at this phpMyAdmin:&quot;
+echo &quot;      # the URL the BROWSER opens phpMyAdmin at (where you serve ${PMA_DIR})&quot;
 echo &quot;      DBVAULT_PMA_SIGNON_URL=http://&lt;pma-host&gt;:${PMA_PORT}/signon.php&quot;
+echo
+echo &quot;  signon.php will call the vault back at:&quot;
+echo &quot;      ${VAULT_EXCHANGE_URL}&quot;
+echo &quot;  (that must be the app&#x27;s real/stable URL, not a transient artisan-serve port.)&quot;
 echo
 
 if [ &quot;$PMA_PORT&quot; != &quot;0&quot; ]; then
