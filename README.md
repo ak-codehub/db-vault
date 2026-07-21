@@ -31,22 +31,53 @@ Provisioning against real RDS and the CloudWatch audit ingest remain deliberate 
 ## Install into a host app
 
 ```bash
+# 1. Require the package
 composer require ak-codehub/db-vault
+
+# 2. Set the VAULT DATABASE in .env FIRST (see "what to configure when" below),
+#    then create that empty database in MySQL.
+
+# 3. Build the SPA, THEN install (install publishes the built assets).
+npm install && npm run build
 php artisan db-vault:install    # publishes config + assets, migrates, seeds roles, creates the first admin
 ```
 
-Configure the install via `.env` (see `config/dbvault.php` for every option):
+### What to configure when
+
+`db-vault:install` runs in order: **publish assets/config → migrate → seed roles → create admin**. Only the *vault storage database* is read during that run — everything else is read later, at runtime, so it can be set **after** install (run `php artisan config:clear` after editing `.env`).
+
+| `.env` variable(s) | Set it… | Why |
+|--------------------|---------|-----|
+| **`DBVAULT_DB_*`** (vault storage DB) | **BEFORE install** | `db-vault:install` migrates the `vault_*` tables into this connection. Leave unset and it falls back to the host app's default DB (shared-schema); set it to keep the vault isolated. |
+| **`DBVAULT_ADMIN_NAME/EMAIL/PASSWORD`** | Before install *(only if `--no-interaction`)* | Used to create the first admin. Interactive mode prompts for these instead. |
+| `DBVAULT_PATH` / `DBVAULT_DOMAIN` | Anytime | Where the panel mounts (runtime routing). |
+| `DBVAULT_TARGET_DATABASE`, `DBVAULT_ALLOWED_DATABASES`, `DBVAULT_INTROSPECTION_CONNECTION` | Anytime (after is fine) | Read only when a user submits an access request. |
+| `DBVAULT_BROWSABLE_TABLES` / `DBVAULT_RESTRICTED_TABLES` | Anytime | Request-form table allow/deny lists (runtime). |
+| `DBVAULT_PROVISION_*` | Anytime | Admin MySQL creds, read only at approval time (CREATE USER/GRANT). |
+| `DBVAULT_PMA_SIGNON_URL`, `DBVAULT_SIGNON_SECRET` | Anytime | phpMyAdmin launch (runtime). |
+| `DBVAULT_CA_*`, `DBVAULT_MIDDLEWARE`, `DBVAULT_MTLS_*` | Anytime | Cert issuance + mTLS enforcement (runtime). |
 
 ```dotenv
-DBVAULT_PATH=vault                 # mount at appname.com/vault (or set DBVAULT_DOMAIN for a subdomain)
-DBVAULT_TARGET_DATABASE=appdb
-DBVAULT_MASTER_SECRET=prod/db/master
-DBVAULT_RDS_HOST=...
-DBVAULT_SERVER_LABEL="prod · web-01"
-DBVAULT_PMA_SIGNON_URL=https://pma.internal/vault_signon.php
+# --- Set BEFORE db-vault:install (vault's own, isolated storage DB) ---
+DBVAULT_DB_DATABASE=dbvault
+DBVAULT_DB_HOST=127.0.0.1
+DBVAULT_DB_USERNAME=root
+DBVAULT_DB_PASSWORD=secret
+
+# --- Can be set anytime after install ---
+DBVAULT_PATH=vault                       # mount at appname.com/vault (or DBVAULT_DOMAIN for a subdomain)
+DBVAULT_TARGET_DATABASE=appdb            # the DB whose access is brokered
+DBVAULT_ALLOWED_DATABASES=appdb,reports  # additional requestable DBs
+DBVAULT_INTROSPECTION_CONNECTION=mysql   # connection used to list target tables
+DBVAULT_PROVISION_ADMIN_USER=root        # admin creds for CREATE USER/GRANT
+DBVAULT_PROVISION_ADMIN_PASSWORD=secret
+DBVAULT_PMA_SIGNON_URL=http://pma-host:8080/signon.php
+DBVAULT_SIGNON_SECRET=<shared secret, matches the phpMyAdmin signon script>
 ```
 
-Then front it with the mTLS nginx vhost from `Phase-0-Infra-Runbook.md` and, to enforce the client-certificate leg, prepend `vault.mtls` to `config('dbvault.middleware')`.
+> **If you set `DBVAULT_DB_*` *after* install**, the `vault_*` tables were already created on the old connection — re-run `php artisan db-vault:install` (or `migrate`) so they exist on the new one.
+
+See `config/dbvault.php` for every option, and the full setup guide at **[`docs/index.html`](docs/index.html)** (phpMyAdmin + optional mTLS, with downloadable scripts).
 
 Schedule the expiry sweep in the host app's `routes/console.php`:
 
