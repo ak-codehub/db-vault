@@ -337,9 +337,40 @@ return [
     'pma_signon_url' => env('DBVAULT_PMA_SIGNON_URL'),
 
     // Shared secret the phpMyAdmin signon script presents (X-DbVault-Signon
-    // header) to the token-exchange endpoint. Must be set for launch signon
-    // to work; keep it secret between the vault and the phpMyAdmin host.
+    // header) to the token-exchange endpoint. Only used by the LEGACY external
+    // signon.php bridge (separate phpMyAdmin process over HTTP). When phpMyAdmin
+    // is served natively via the built-in proxy (see `pma_path` below) the
+    // exchange happens in-process and no shared secret is needed.
     'signon_secret' => env('DBVAULT_SIGNON_SECRET'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Native phpMyAdmin
+    |--------------------------------------------------------------------------
+    |
+    | phpMyAdmin is served natively under `{path}/pma` (e.g.
+    | https://host/vault/pma) on the host's own origin/TLS — no separate port,
+    | no separate vhost. It runs as its OWN web-server/FPM request (it ships its
+    | own Composer vendor tree, which cannot coexist in the Laravel process), so
+    | it is served by a web-server location block, NOT a Laravel route. An nginx
+    | template ships at phpmyadmin-stubs/deploy/nginx-pma.conf.
+    |
+    | phpMyAdmin is not bundled in this package (it is a ~50 MB third-party app);
+    | install it onto this host with `php artisan dbvault:install-pma`, which
+    | downloads a pinned, checksum-verified release into `pma_path` and overlays
+    | the packaged signon config. `pma_path` defaults to storage/app/dbvault-pma.
+    |
+    | `pma_signon_url` (above) may be left unset: DbSessionController::launch()
+    | then defaults to the relative "{path}/pma/signon.php". Set it to an
+    | absolute URL only for an externally-hosted phpMyAdmin.
+    |
+    */
+    'pma_path' => env('DBVAULT_PMA_PATH', storage_path('app/dbvault-pma')),
+
+    // Whether launch() should default pma_signon_url to the native
+    // "{path}/pma/signon.php" when it is otherwise unset. Kept as a flag so an
+    // install with no phpMyAdmin can disable the phpMyAdmin launch affordance.
+    'pma_proxy_enabled' => env('DBVAULT_PMA_PROXY_ENABLED', true),
 
     /*
     |--------------------------------------------------------------------------

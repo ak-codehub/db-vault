@@ -7,7 +7,9 @@ namespace DbVault;
 use DbVault\Console\Commands\AdminCommand;
 use DbVault\Console\Commands\DropExpiredDbSessions;
 use DbVault\Console\Commands\InstallCommand;
+use DbVault\Console\Commands\InstallPhpMyAdmin;
 use DbVault\Console\Commands\MakeCertificateAuthority;
+use DbVault\Console\Commands\PhpMyAdminVhost;
 use DbVault\Http\Middleware\Authenticate;
 use DbVault\Http\Middleware\EnsureRole;
 use DbVault\Http\Middleware\EnsureViewDbVaultGate;
@@ -77,6 +79,8 @@ class DbVaultServiceProvider extends ServiceProvider
                 AdminCommand::class,
                 DropExpiredDbSessions::class,
                 MakeCertificateAuthority::class,
+                InstallPhpMyAdmin::class,
+                PhpMyAdminVhost::class,
             ]);
         }
     }
@@ -280,6 +284,14 @@ class DbVaultServiceProvider extends ServiceProvider
             Route::post('sessions/exchange', [\DbVault\Http\Controllers\Api\DbSessionController::class, 'exchange'])
                 ->name('sessions.exchange');
         });
+
+        // phpMyAdmin is NOT routed through Laravel: it ships with its own
+        // Composer vendor tree (psr/log, thecodingmachine/safe, …) that cannot
+        // coexist in the booted Laravel process. Instead it is served by the
+        // web server directly under "{path}/pma" via the packaged nginx
+        // snippet (see phpmyadmin/deploy/nginx-pma.conf), on the SAME
+        // origin/TLS as the panel — no separate port. Only the signon token
+        // exchange crosses back into Laravel (routes above).
 
         Route::group([
             'domain' => $domain,

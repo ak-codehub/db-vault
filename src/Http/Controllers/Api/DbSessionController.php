@@ -10,6 +10,7 @@ use DbVault\Models\DbSession;
 use DbVault\Models\SignonToken;
 use DbVault\Services\ActivityLogger;
 use DbVault\Services\ProvisionerService;
+use DbVault\Services\SignonTokenService;
 use DbVault\Support\Presenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -94,8 +95,31 @@ class DbSessionController extends Controller
         $this->activityLogger->log($request->user(), 'db_session.pma_launch', $dbSession);
 
         return response()->json([
-            'pma_url' => rtrim((string) config('dbvault.pma_signon_url'), '?&').'?token='.$rawToken,
+            'pma_url' => $this->pmaSignonUrl().'?token='.$rawToken,
         ]);
+    }
+
+    /**
+     * Where the client opens phpMyAdmin. An explicit dbvault.pma_signon_url
+     * wins (legacy external phpMyAdmin over its own origin). Otherwise, when
+     * the native proxy is enabled, default to the proxied relative signon path
+     * "{path}/pma/signon.php" so the feature works with zero URL config.
+     */
+    private function pmaSignonUrl(): string
+    {
+        $configured = trim((string) config('dbvault.pma_signon_url'), " \t");
+        if ($configured !== '') {
+            return rtrim($configured, '?&');
+        }
+
+        if (config('dbvault.pma_proxy_enabled', true) && is_dir((string) config('dbvault.pma_path'))) {
+            $path = trim((string) config('dbvault.path', 'vault'), '/');
+            $prefix = $path === '' ? 'pma' : $path.'/pma';
+
+            return url($prefix.'/signon.php');
+        }
+
+        return rtrim($configured, '?&');
     }
 
     /**
@@ -116,29 +140,10 @@ class DbSessionController extends Controller
         $raw = (string) $request->input('token');
         abort_if($raw === '', 422, 'Missing token.');
 
-        // Find a still-valid token by comparing the hash. Tokens are few and
-        // short-lived, so scanning the small unused/unexpired set is fine.
-        $candidate = SignonToken::query()
-            ->whereNull('used_at')
-            ->where('expires_at', '>', now())
-            ->latest('id')
-            ->get()
-            ->first(fn (SignonToken $t) => Hash::check($raw, $t->token_hash));
+        $cred = app(SignonTokenService::class)->redeem($raw);
+        abort_if($cred === null, 404, 'Invalid or expired token.');
 
-        abort_if($candidate === null, 404, 'Invalid or expired token.');
-
-        $candidate->forceFill(['used_at' => now()])->save(); // single-use
-
-        $session = $candidate->dbSession;
-        abort_if($session->status !== SessionStatus::Active || $session->isExpired(), 410, 'Session not active.');
-
-        return response()->json([
-            'username' => $session->mysql_username,
-            'password' => $session->secret,
-            'host' => config('dbvault.provisioner.host', config('dbvault.rds_host', '127.0.0.1')),
-            'port' => (int) config('dbvault.provisioner.port', config('dbvault.rds_port', 3306)),
-            'database' => config('dbvault.target_database'),
-        ]);
+        return response()->json($cred);
     }
 
     /**
