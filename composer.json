@@ -1,6 +1,6 @@
 {
     "name": "ak-codehub/db-vault",
-    "description": "DB Vault: an internal, self-contained DB access-broker panel (Horizon/Filament-style) that mounts inside any Laravel 12 app at a configurable domain/path, with its own auth, 2FA, SPA, and JSON API.",
+    "description": "DB Vault: an internal, self-contained DB access-broker panel (Horizon/Filament-style) that mounts inside any Laravel 11, 12, or 13 app at a configurable domain/path, with its own auth, 2FA, SPA, and JSON API.",
     "type": "library",
     "license": "MIT",
     "homepage": "https://github.com/ak-codehub/db-vault",
