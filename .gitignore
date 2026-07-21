@@ -1,6 +1,38 @@
 composer.phar
-/vendor/
 
-# Commit your application's lock file https://getcomposer.org/doc/01-basic-usage.md#commit-your-composer-lock-file-to-version-control
-# You may choose to ignore a library lock file http://getcomposer.org/doc/02-libraries.md#lock-file
-# composer.lock
+# Dependencies (installed via composer/npm, never committed)
+/vendor/
+/node_modules/
+
+# Composer lockfile — for a library the consuming app owns the lock, not us.
+# https://getcomposer.org/doc/02-libraries.md#lock-file
+/composer.lock
+
+# Front-end build tooling caches
+/.vite/
+*.log
+
+# Test / tooling caches
+/.phpunit.result.cache
+/.phpunit.cache/
+/.php-cs-fixer.cache
+/coverage/
+/build/
+
+# Generated certs / keys / secrets (scripts are tracked; their output is not)
+/docs/scripts/*.local
+*.p12
+*.pem
+*.key
+!resources/**/*.key
+
+# Editor / OS
+/.idea/
+/.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Environment / secrets (belong to the host app, never the package)
+.env
+.env.*
