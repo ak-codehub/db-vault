@@ -48,7 +48,7 @@ php artisan db-vault:install    # publishes config + assets, migrates, seeds rol
 
 | `.env` variable(s) | Set it… | Why |
 |--------------------|---------|-----|
-| **`DBVAULT_DB_*`** (vault storage DB) | **BEFORE install** | `db-vault:install` migrates the `vault_*` tables into this connection. Leave unset and it falls back to the host app's default DB (shared-schema); set it to keep the vault isolated. |
+| **`DBVAULT_DB_DATABASE`** (vault storage DB) | **BEFORE install** | `db-vault:install` migrates the `vault_*` tables into this connection. The vault connection **inherits your host app's default DB credentials** (driver/host/user/password) and only overrides the database name — so usually this is the *only* var you set. Leave it unset to share the host's default DB (shared-schema). |
 | **`DBVAULT_ADMIN_NAME/EMAIL/PASSWORD`** | Before install *(only if `--no-interaction`)* | Used to create the first admin. Interactive mode prompts for these instead. |
 | `DBVAULT_PATH` / `DBVAULT_DOMAIN` | Anytime | Where the panel mounts (runtime routing). |
 | `DBVAULT_TARGET_DATABASE`, `DBVAULT_ALLOWED_DATABASES`, `DBVAULT_INTROSPECTION_CONNECTION` | Anytime (after is fine) | Read only when a user submits an access request. |
@@ -59,10 +59,13 @@ php artisan db-vault:install    # publishes config + assets, migrates, seeds rol
 
 ```dotenv
 # --- Set BEFORE db-vault:install (vault's own, isolated storage DB) ---
+# Usually just this one line: the connection inherits your host DB_* creds
+# and only points at a different database. Create this empty DB first.
 DBVAULT_DB_DATABASE=dbvault
-DBVAULT_DB_HOST=127.0.0.1
-DBVAULT_DB_USERNAME=root
-DBVAULT_DB_PASSWORD=secret
+# Optional overrides (only if the vault DB uses DIFFERENT creds/host than your app):
+#   DBVAULT_DB_DRIVER=mysql        # or sqlite / pgsql
+#   DBVAULT_DB_PATH=/abs/dbvault.sqlite   # sqlite only
+#   DBVAULT_DB_HOST= / _PORT= / _USERNAME= / _PASSWORD=
 
 # --- Can be set anytime after install ---
 DBVAULT_PATH=vault                       # mount at appname.com/vault (or DBVAULT_DOMAIN for a subdomain)

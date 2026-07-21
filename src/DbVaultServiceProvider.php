@@ -130,11 +130,60 @@ class DbVaultServiceProvider extends ServiceProvider
      */
     protected function registerDatabaseConnection(): void
     {
-        foreach ((array) config('dbvault.connections', []) as $name => $definition) {
-            if (! config("database.connections.{$name}")) {
-                config(["database.connections.{$name}" => $definition]);
+        // Only build the dedicated connection when the vault actually uses it
+        // (config('dbvault.connection') === 'dbvault'); otherwise the vault
+        // rides the host's default connection and there is nothing to register.
+        if (config('dbvault.connection') !== 'dbvault') {
+            return;
+        }
+
+        // Don't clobber a 'dbvault' connection the host may have defined itself.
+        if (config('database.connections.dbvault')) {
+            return;
+        }
+
+        $overrides = array_filter(
+            (array) config('dbvault.connections.dbvault', []),
+            static fn ($v) => $v !== null && $v !== '',
+        );
+
+        $driver = $overrides['driver']
+            ?? config('database.connections.'.config('database.default').'.driver')
+            ?? 'mysql';
+
+        if ($driver === 'sqlite') {
+            // SQLite: inherit the host's sqlite config, override only the file.
+            $base = (array) config('database.connections.sqlite', [
+                'driver' => 'sqlite', 'prefix' => '', 'foreign_key_constraints' => true,
+            ]);
+            $base['driver'] = 'sqlite';
+            if (isset($overrides['path'])) {
+                $base['database'] = $overrides['path'];
+            } elseif (isset($overrides['database'])) {
+                $base['database'] = $overrides['database'];
+            }
+            config(['database.connections.dbvault' => $base]);
+
+            return;
+        }
+
+        // MySQL / MariaDB / Postgres: START from the host's DEFAULT connection
+        // (so username/password/host/charset that already work are reused),
+        // then apply only the explicitly-set DBVAULT_DB_* overrides + the
+        // target database name.
+        $base = (array) config('database.connections.'.config('database.default'), []);
+        $base['driver'] = $driver;
+
+        foreach (['host', 'port', 'username', 'password', 'unix_socket'] as $key) {
+            if (isset($overrides[$key])) {
+                $base[$key] = $overrides[$key];
             }
         }
+        if (isset($overrides['database'])) {
+            $base['database'] = $overrides['database'];
+        }
+
+        config(['database.connections.dbvault' => $base]);
     }
 
     /**

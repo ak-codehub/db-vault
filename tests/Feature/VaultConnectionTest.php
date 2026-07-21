@@ -20,26 +20,54 @@ class VaultConnectionTest extends TestCase
         $this->assertSame('some_vault_conn', (new AccessRequest())->getConnectionName());
     }
 
-    public function test_the_package_registers_its_own_connection_additively_at_boot(): void
+    public function test_no_dedicated_connection_is_registered_when_not_configured(): void
     {
-        // The provider ran registerDatabaseConnection() during boot. Because
-        // the test host sets DB_CONNECTION=testing and leaves DBVAULT_DB_*
-        // unset, config('dbvault.connection') resolves to 'testing' and the
-        // packaged 'dbvault' connection definition is still exposed to the
-        // host database manager.
-        $this->assertNotNull(
-            config('database.connections.dbvault'),
-            'The package should register its own dbvault connection definition.',
-        );
+        // With DBVAULT_DB_* unset, the vault rides the host default connection
+        // and no separate 'dbvault' connection is built. (Regression guard:
+        // the provider must NOT invent a connection with default/empty creds.)
+        $this->assertNotSame('dbvault', config('dbvault.connection'));
+        $this->assertNull(config('database.connections.dbvault'));
+    }
 
-        // The host's own pre-existing 'testing' connection is untouched.
-        $original = config('database.connections.testing');
-        $this->assertNotNull($original);
+    public function test_dedicated_connection_inherits_host_credentials_and_overrides_only_the_database(): void
+    {
+        // Regression guard for the install failure: setting just the vault DB
+        // name must reuse the host's WORKING driver/host/user/password and
+        // only swap the database — not fall back to empty creds.
+        //
+        // We assert on the built config array only (never open the connection,
+        // so no live DB is needed) and restore state afterwards.
+        $realDefault = config('database.default');
 
-        $definition = ['driver' => 'mysql', 'database' => 'SHOULD_NOT_OVERWRITE'];
-        if (! config('database.connections.testing')) {
-            config(['database.connections.testing' => $definition]);
+        try {
+            config()->set('database.default', 'mysqlish');
+            config()->set('database.connections.mysqlish', [
+                'driver' => 'mysql', 'host' => 'db.example', 'port' => '3307',
+                'database' => 'app_db', 'username' => 'appuser', 'password' => 's3cret',
+                'charset' => 'utf8mb4',
+            ]);
+            config()->set('dbvault.connection', 'dbvault');
+            config()->set('dbvault.connections.dbvault', [
+                'driver' => null, 'database' => 'vault_db', 'path' => null,
+                'host' => null, 'port' => null, 'username' => null,
+                'password' => null, 'unix_socket' => null,
+            ]);
+            config()->set('database.connections.dbvault', null);
+
+            $provider = new \DbVault\DbVaultServiceProvider($this->app);
+            $m = new \ReflectionMethod($provider, 'registerDatabaseConnection');
+            $m->setAccessible(true);
+            $m->invoke($provider);
+
+            $c = config('database.connections.dbvault');
+            $this->assertSame('vault_db', $c['database'], 'database is overridden');
+            $this->assertSame('appuser', $c['username'], 'username inherited from host default');
+            $this->assertSame('s3cret', $c['password'], 'password inherited from host default');
+            $this->assertSame('db.example', $c['host'], 'host inherited from host default');
+        } finally {
+            // Restore so RefreshDatabase teardown uses the real test connection.
+            config()->set('database.default', $realDefault);
+            config()->set('database.connections.dbvault', null);
         }
-        $this->assertSame($original, config('database.connections.testing'));
     }
 }

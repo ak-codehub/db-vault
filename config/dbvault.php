@@ -92,41 +92,41 @@ return [
     |
     */
     // Use the dedicated 'dbvault' connection whenever the vault DB is
-    // configured — either a MySQL/Postgres database name (DBVAULT_DB_DATABASE)
-    // or a SQLite file path (DBVAULT_DB_PATH). Otherwise fall back to the
-    // host's default connection (legacy shared-schema behaviour).
+    // configured — either a database name (DBVAULT_DB_DATABASE) or a SQLite
+    // file path (DBVAULT_DB_PATH). Otherwise fall back to the host's default
+    // connection (legacy shared-schema behaviour).
     'connection' => (env('DBVAULT_DB_DATABASE') || env('DBVAULT_DB_PATH'))
         ? 'dbvault'
         : env('DB_CONNECTION', 'mysql'),
 
-    // The vault's storage connection is driver-aware so you can switch
-    // engines with env alone — no code change:
-    //   MySQL/MariaDB (default): set DBVAULT_DB_DATABASE (+ host/user/pass)
-    //   SQLite:                  set DBVAULT_DB_DRIVER=sqlite and
-    //                            DBVAULT_DB_PATH=/abs/path/dbvault.sqlite
-    //   Postgres:                set DBVAULT_DB_DRIVER=pgsql (+ connection env)
+    // The dedicated 'dbvault' connection. By default it INHERITS the host
+    // app's existing default connection (driver, host, port, username,
+    // password, socket, charset, ...) and only overrides the database it
+    // points at — so in the common case you set just ONE thing:
+    //
+    //     DBVAULT_DB_DATABASE=dbvault      # MySQL/Postgres: separate database
+    //   or
+    //     DBVAULT_DB_DRIVER=sqlite
+    //     DBVAULT_DB_PATH=/abs/path/dbvault.sqlite
+    //
+    // Every DBVAULT_DB_* var below is an optional override; unset ones reuse
+    // the host's DB_* credentials, which already work. This is resolved in the
+    // service provider (registerDatabaseConnection) so it can read the host's
+    // live default-connection config at boot.
     'connections' => [
-        'dbvault' => env('DBVAULT_DB_DRIVER', 'mysql') === 'sqlite'
-            ? [
-                'driver' => 'sqlite',
-                'database' => env('DBVAULT_DB_PATH', database_path('dbvault.sqlite')),
-                'prefix' => '',
-                'foreign_key_constraints' => true,
-            ]
-            : [
-                'driver' => env('DBVAULT_DB_DRIVER', 'mysql'),
-                'host' => env('DBVAULT_DB_HOST', env('DB_HOST', '127.0.0.1')),
-                'port' => env('DBVAULT_DB_PORT', env('DB_PORT', '3306')),
-                'database' => env('DBVAULT_DB_DATABASE'),
-                'username' => env('DBVAULT_DB_USERNAME', env('DB_USERNAME', 'root')),
-                'password' => env('DBVAULT_DB_PASSWORD', env('DB_PASSWORD', '')),
-                'unix_socket' => env('DBVAULT_DB_SOCKET', ''),
-                'charset' => 'utf8mb4',
-                'collation' => 'utf8mb4_unicode_ci',
-                'prefix' => '',
-                'strict' => true,
-                'engine' => null,
-            ],
+        'dbvault' => [
+            // Marker consumed by the provider; the real definition is built
+            // there by merging the host default connection with these
+            // overrides. Kept here so config:cache captures the env values.
+            'driver' => env('DBVAULT_DB_DRIVER'),        // null => inherit host default's driver
+            'database' => env('DBVAULT_DB_DATABASE'),    // MySQL/pgsql db name
+            'path' => env('DBVAULT_DB_PATH'),            // sqlite file path
+            'host' => env('DBVAULT_DB_HOST'),
+            'port' => env('DBVAULT_DB_PORT'),
+            'username' => env('DBVAULT_DB_USERNAME'),
+            'password' => env('DBVAULT_DB_PASSWORD'),
+            'unix_socket' => env('DBVAULT_DB_SOCKET'),
+        ],
     ],
 
     /*
