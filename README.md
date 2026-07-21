@@ -68,14 +68,24 @@ DBVAULT_DB_DATABASE=dbvault
 #   DBVAULT_DB_HOST= / _PORT= / _USERNAME= / _PASSWORD=
 
 # --- Can be set anytime after install ---
-DBVAULT_PATH=vault                       # mount at appname.com/vault (or DBVAULT_DOMAIN for a subdomain)
-DBVAULT_TARGET_DATABASE=appdb            # the DB whose access is brokered
-DBVAULT_ALLOWED_DATABASES=appdb,reports  # additional requestable DBs
-DBVAULT_INTROSPECTION_CONNECTION=mysql   # connection used to list target tables
-DBVAULT_PROVISION_ADMIN_USER=root        # admin creds for CREATE USER/GRANT
+# NOTE: put each value on its own line with NO trailing "# comment" — some
+# dotenv setups treat the comment as part of the value. Replace the sample
+# values below with your real ones.
+
+# Where the panel mounts (or set DBVAULT_DOMAIN for a subdomain)
+DBVAULT_PATH=vault
+# The database whose access is brokered
+DBVAULT_TARGET_DATABASE=appdb
+# Additional requestable databases (real names, comma-separated) — or omit
+DBVAULT_ALLOWED_DATABASES=appdb
+# Connection used to list target tables in the request form
+DBVAULT_INTROSPECTION_CONNECTION=mysql
+# Admin creds used to CREATE USER / GRANT on the target at approval time
+DBVAULT_PROVISION_ADMIN_USER=root
 DBVAULT_PROVISION_ADMIN_PASSWORD=secret
+# phpMyAdmin signon (must match the secret in the phpMyAdmin signon script)
 DBVAULT_PMA_SIGNON_URL=http://pma-host:8080/signon.php
-DBVAULT_SIGNON_SECRET=<shared secret, matches the phpMyAdmin signon script>
+DBVAULT_SIGNON_SECRET=change-me
 ```
 
 > **If you set `DBVAULT_DB_*` *after* install**, the `vault_*` tables were already created on the old connection — re-run `php artisan db-vault:install` (or `migrate`) so they exist on the new one.
