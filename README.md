@@ -48,12 +48,20 @@ DBVAULT_PATH=vault
 # The database whose access you are brokering
 DBVAULT_TARGET_DATABASE=appdb
 
+# Connection (from config/database.php) used to LIST the target's tables in the
+# request form. REQUIRED for the request form to show any tables — without it
+# the "Request access" table picker is empty. Usually your host app's default
+# MySQL connection.
+DBVAULT_INTROSPECTION_CONNECTION=mysql
+
 # Admin MySQL creds used to CREATE USER / GRANT the temporary accounts
 DBVAULT_PROVISION_ADMIN_USER=root
 DBVAULT_PROVISION_ADMIN_PASSWORD=secret
 ```
 
-**Done.** Visit `/vault`, log in as your admin, and the request → approve → session flow works. To let approved developers open phpMyAdmin in one click, do the [phpMyAdmin signon](#phpmyadmin-signon) setup below.
+**Done.** Visit `/vault`, log in as your admin, and the request → approve → session flow works. To let approved developers open phpMyAdmin in one click, do the [phpMyAdmin setup](#phpmyadmin-native-under-your-app-url) below.
+
+> **Note — separation of duties:** an approver **cannot approve or reject their own request** (you'll see "You cannot approve or reject your own request"). Use a second user with the `approver` or `admin` role to approve.
 
 ### One recommended extra: schedule the expiry sweep
 
@@ -71,50 +79,47 @@ Schedule::command('dbvault:drop-expired-sessions')->everyFiveMinutes();
 
 Everything below is optional — the Quick Start covers a working install. Reach for these when you need phpMyAdmin one-click launch, a non-default database setup, or hardened deployment.
 
-### phpMyAdmin signon
+### phpMyAdmin (native, under your app URL)
 
-Clicking **Open phpMyAdmin** on an active session logs the developer straight in as their temporary, scoped MySQL user — password never shown. The `install-phpmyadmin.sh` script (in [`docs/scripts/`](docs/scripts/)) downloads phpMyAdmin and writes the two files that make this work (`config.inc.php` in signon mode + a `signon.php` bridge).
+Clicking **Open phpMyAdmin** on an active session logs the developer straight in as their temporary, scoped MySQL user — password never shown. phpMyAdmin is served **natively under your app's own URL** at `{DBVAULT_PATH}/pma` (e.g. `https://your-app.example.com/vault/pma`) — same origin, same TLS cert, **no separate port and no separate vhost**.
 
-**The one thing to get right:** there are **two different URLs** for two different services. Mixing them up is the most common failure.
+phpMyAdmin runs as its own web-server/PHP-FPM request (it ships its own Composer dependencies, which cannot coexist inside the Laravel process), so it is served by a web-server `location`/`<Directory>` block, not a Laravel route. Only the single-use signon token exchange crosses back into the app. Because phpMyAdmin is a ~50 MB third-party application it is **not bundled** in this package — two commands install and wire it:
 
-| URL | Direction | Points at | Set via |
-|-----|-----------|-----------|---------|
-| **Exchange URL** | phpMyAdmin → vault (server-to-server) | your **Laravel app** | `VAULT_EXCHANGE_URL` (baked into `signon.php`) |
-| **Signon URL** | browser → phpMyAdmin | **phpMyAdmin** | `DBVAULT_PMA_SIGNON_URL` (vault `.env`) |
-
-**Install** — point the exchange at your app's **real, stable URL** (an nginx/apache vhost). Do **not** use a `php artisan serve` port: that process reads `.env` once at boot and serves a stale signon secret, causing a 403 at exchange.
+**Step 1 — download phpMyAdmin onto this host**
 
 ```bash
-sudo VAULT_EXCHANGE_URL="https://your-app.example.com/vault/api/sessions/exchange" \
-     VAULT_SIGNON_SECRET="$(openssl rand -hex 24)" \
-     ./install-phpmyadmin.sh
+php artisan dbvault:install-pma
+# downloads a pinned, SHA-256-verified phpMyAdmin release into
+# storage/app/dbvault-pma and overlays the signon config.inc.php + signon.php.
+# --path=/custom/dir to install elsewhere (then set DBVAULT_PMA_PATH to match).
 ```
 
-**Then** set both of these in the vault app's `.env` and run `php artisan config:clear`:
+**Step 2 — generate the web-server config block and paste it into your vhost**
+
+```bash
+php artisan dbvault:pma-vhost           # auto-detects nginx vs Apache + the FPM socket
+php artisan dbvault:pma-vhost --server=apache   # force a server
+```
+
+This prints a **fully-resolved** block (real install path, your `{vault-path}/pma` prefix, the signon secret, and `PmaAbsoluteUri` derived from `APP_URL`) — nothing is hardcoded and the package never writes to `/etc`. Paste it **inside your app's existing HTTPS `server {}` (nginx) or `<VirtualHost>` (Apache)** block, then reload the web server. The block carries the signon secret to `signon.php` as a `fastcgi_param` (nginx) / `SetEnv` (Apache), since `signon.php` runs outside Laravel and can't read `.env`.
+
+**Step 3 — set the secret in the app `.env`** (must match the value the generated block carries), then `php artisan config:clear`:
 
 ```dotenv
-# must byte-for-byte equal VAULT_SIGNON_SECRET the script printed
-DBVAULT_SIGNON_SECRET=<the secret the script printed>
-# where the BROWSER opens phpMyAdmin (wherever you serve it)
-DBVAULT_PMA_SIGNON_URL=https://pma.example.com/signon.php
+# Guards the token-exchange endpoint (the Laravel side of the check). MUST equal
+# the DBVAULT_SIGNON_SECRET fastcgi_param/SetEnv in the generated vhost block.
+DBVAULT_SIGNON_SECRET=<a long random string>
+# Leave DBVAULT_PMA_SIGNON_URL UNSET — launch() then defaults to
+# {vault-path}/pma/signon.php automatically. Only set it for an externally
+# hosted phpMyAdmin on a different origin.
 ```
 
-**Serving phpMyAdmin behind nginx** (instead of the built-in dev server): run the installer with `PMA_PORT=0` (skips `php -S`), point an nginx vhost with PHP-FPM at `PMA_DIR` (default `/var/www/phpmyadmin`), and set `DBVAULT_PMA_SIGNON_URL` to that vhost's `…/signon.php`.
+> **Why not `php artisan serve`?** mTLS/native phpMyAdmin need a real web server (nginx/Apache) in front — `artisan serve` is single-process and can't run phpMyAdmin's separate PHP request. Use it only for the panel itself in bare local dev.
 
-**Local dev with a self-signed cert** (e.g. `*.local`): add two **local-only** flags so `signon.php`'s curl reaches the vault without a public cert or DNS entry (they are omitted from the generated file unless set — never use them in production):
-
-```bash
-sudo VAULT_EXCHANGE_URL="https://myapp.local/vault/api/sessions/exchange" \
-     VAULT_SIGNON_SECRET="$(openssl rand -hex 24)" \
-     VAULT_INSECURE_TLS=1 \
-     VAULT_RESOLVE="myapp.local:443:127.0.0.1" \
-     ./install-phpmyadmin.sh
-```
-
-**Troubleshooting** — the generated `signon.php` reports the actual cause:
-- *"Could not reach the vault…"* → wrong `VAULT_EXCHANGE_URL`, DNS, or TLS.
-- *"Signon secret mismatch…"* → `VAULT_SIGNON_SECRET` ≠ the app's `DBVAULT_SIGNON_SECRET`; fix `.env`, then `config:clear` **and restart the web process** (a running `artisan serve` holds a stale `.env`).
-- *"session no longer valid (HTTP 404/410)"* → the launch token expired (2 min, single-use) or the session isn't active — launch again from the panel.
+**Troubleshooting**
+- **Clicking "Open phpMyAdmin" loops back to the same UI** → the exchange returned 403 because `DBVAULT_SIGNON_SECRET` is empty or ≠ the vhost's value. Uncomment/fix it in `.env`, `config:clear`, and confirm it matches the `fastcgi_param`/`SetEnv`. This is the most common cause.
+- **404 at `/vault/pma`** → phpMyAdmin isn't installed (re-run `dbvault:install-pma`) or the vhost `alias`/`Alias` points at the wrong path (re-run `dbvault:pma-vhost` to get the correct one). Note `storage/app/dbvault-pma` is git-ignored and cleared by some deploy steps — reinstall after a fresh checkout/deploy.
+- **"session no longer valid (HTTP 404/410)"** → the launch token expired (2 min, single-use) or the session isn't active — launch again from the panel.
 
 ### Storage database options
 
@@ -168,7 +173,7 @@ Related env: `DBVAULT_DOMAIN` (mount on a subdomain instead of a path), `DBVAULT
 | `DBVAULT_TARGET_DATABASE` / `DBVAULT_ALLOWED_DATABASES` / `DBVAULT_INTROSPECTION_CONNECTION` | anytime | Request form |
 | `DBVAULT_BROWSABLE_TABLES` / `DBVAULT_RESTRICTED_TABLES` | anytime | Table allow/deny |
 | `DBVAULT_PROVISION_*` | anytime | Admin MySQL creds (CREATE USER / GRANT at approval) |
-| `DBVAULT_PMA_SIGNON_URL` / `DBVAULT_SIGNON_SECRET` | anytime | phpMyAdmin launch |
+| `DBVAULT_SIGNON_SECRET` / `DBVAULT_PMA_PATH` / `DBVAULT_PMA_SIGNON_URL` | anytime | phpMyAdmin (`install-pma` + `pma-vhost`) |
 | `DBVAULT_CA_*` / `DBVAULT_MIDDLEWARE` / `DBVAULT_MTLS_*` | anytime | Cert issuance + mTLS |
 
 > Put each `.env` value on its own line with no trailing `# comment` — some dotenv parsers fold the comment into the value.

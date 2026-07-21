@@ -20,6 +20,14 @@ const rejecting = ref(null);
 const showReject = ref(false);
 const rejectNote = ref('');
 const busy = ref(false);
+// Surfaces a failed decision (e.g. the 403 when an approver tries to decide on
+// their own request). Cleared before each attempt.
+const actionError = ref(null);
+
+// Pull the server's human message off an axios error, with sensible fallbacks.
+function apiMessage(e, fallback) {
+    return e?.response?.data?.message || e?.message || fallback;
+}
 
 async function load() {
     loading.value = true;
@@ -47,9 +55,12 @@ function openReject(item) {
 
 async function approve(id) {
     busy.value = true;
+    actionError.value = null;
     try {
         await approvalsApi.approve(id);
         approvals.value = approvals.value.filter((a) => a.id !== id);
+    } catch (e) {
+        actionError.value = apiMessage(e, 'Could not approve this request.');
     } finally {
         busy.value = false;
     }
@@ -58,14 +69,20 @@ async function approve(id) {
 async function confirmReject() {
     if (rejecting.value) {
         busy.value = true;
+        actionError.value = null;
         try {
             await approvalsApi.reject(rejecting.value.id, rejectNote.value || undefined);
             approvals.value = approvals.value.filter((a) => a.id !== rejecting.value.id);
+            showReject.value = false;
+        } catch (e) {
+            actionError.value = apiMessage(e, 'Could not reject this request.');
+            showReject.value = false;
         } finally {
             busy.value = false;
         }
+    } else {
+        showReject.value = false;
     }
-    showReject.value = false;
 }
 
 onMounted(load);
@@ -79,6 +96,15 @@ onMounted(load);
                 <p>Requests waiting on a decision</p>
             </div>
             <span class="badge badge-warn">{{ approvals.length }} pending</span>
+        </div>
+
+        <div
+            v-if="actionError"
+            class="note mb-4"
+            style="background:#fef2f2;border-color:#fecaca;color:#dc2626;"
+        >
+            <i class="ti ti-alert-triangle"></i>
+            <div>{{ actionError }}</div>
         </div>
 
         <div v-if="loading" class="text-ink-3 text-[13px] py-10 text-center">Loading approvals…</div>

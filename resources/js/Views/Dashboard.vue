@@ -14,6 +14,9 @@ const { server } = useAuth();
 
 const loading = ref(true);
 const error = ref(null);
+// Decision (approve/reject) failure, shown as a banner above content without
+// replacing the dashboard the way a load `error` does.
+const actionError = ref(null);
 
 const stats = ref({
     activeSessions: 0,
@@ -45,16 +48,31 @@ async function load() {
     }
 }
 
+function apiMessage(e, fallback) {
+    return e?.response?.data?.message || e?.message || fallback;
+}
+
 async function approve(id) {
-    await approvalsApi.approve(id);
-    pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== id);
-    stats.value.pendingApprovals = Math.max(0, (stats.value.pendingApprovals ?? 1) - 1);
+    actionError.value = null;
+    try {
+        await approvalsApi.approve(id);
+        pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== id);
+        stats.value.pendingApprovals = Math.max(0, (stats.value.pendingApprovals ?? 1) - 1);
+    } catch (e) {
+        actionError.value = apiMessage(e, 'Could not approve this request.');
+    }
 }
 
 async function reject(id) {
-    await approvalsApi.reject(id);
-    pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== id);
-    stats.value.pendingApprovals = Math.max(0, (stats.value.pendingApprovals ?? 1) - 1);
+    actionError.value = null;
+    try {
+        await approvalsApi.reject(id);
+        pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== id);
+        stats.value.pendingApprovals = Math.max(0, (stats.value.pendingApprovals ?? 1) - 1);
+    } catch (e) {
+        actionError.value = apiMessage(e, 'Could not reject this request.');
+        return;
+    }
 }
 
 onMounted(load);
@@ -76,6 +94,14 @@ onMounted(load);
             <div>{{ error }}</div>
         </div>
         <template v-else>
+            <div
+                v-if="actionError"
+                class="note mb-4"
+                style="background:#fef2f2;border-color:#fecaca;color:#dc2626;"
+            >
+                <i class="ti ti-alert-triangle"></i>
+                <div>{{ actionError }}</div>
+            </div>
             <div class="grid grid-cols-4 gap-4 mb-[22px]">
                 <StatCard
                     label="Active sessions"

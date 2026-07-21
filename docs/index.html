@@ -82,7 +82,7 @@ summary { cursor:pointer; font-weight:600; }
   <table>
     <tr><th>Step</th><th>What</th><th>Needed?</th></tr>
     <tr><td>1</td><td>Install <code>ak-codehub/db-vault</code> into your Laravel app</td><td>Required</td></tr>
-    <tr><td>2</td><td>phpMyAdmin in signon mode (where launched sessions land)</td><td><b>Required</b></td></tr>
+    <tr><td>2</td><td>phpMyAdmin served natively under <code>{vault-path}/pma</code> (where launched sessions land)</td><td><b>Required</b></td></tr>
     <tr><td>3–5</td><td>CA + reverse-proxy mTLS + enforcement</td><td>Optional</td></tr>
   </table>
 
@@ -108,28 +108,39 @@ php artisan db-vault:install            # migrates, seeds roles, creates first a
     </div>
   </div>
 
-  <h2 id="phpmyadmin">2 · phpMyAdmin (signon) <span class="badge b-req">required</span></h2>
+  <h2 id="phpmyadmin">2 · phpMyAdmin (native) <span class="badge b-req">required</span></h2>
   <p>When a user launches a session, DB Vault mints a one-time token and sends them to phpMyAdmin,
   which trades the token for the temporary MySQL credential and logs them in automatically — no
-  password ever shown. This script downloads phpMyAdmin and installs the DB-Vault signon config.</p>
+  password ever shown. phpMyAdmin is served <b>natively under your app's own URL</b> at
+  <code>{DBVAULT_PATH}/pma</code> (e.g. <code>https://your-app.example.com/vault/pma</code>) —
+  same origin, same TLS cert, <b>no separate port and no separate vhost</b>. Two artisan commands
+  install and wire it; phpMyAdmin itself is downloaded onto your host (not bundled in the package).</p>
 
-  <button class="dl" data-dl="install-phpmyadmin.sh">&#8681; Download install-phpmyadmin.sh</button>
   <div class="steps">
-    <div class="step"><h3>Run it</h3>
-      <pre><code>chmod +x install-phpmyadmin.sh
-sudo VAULT_SIGNON_SECRET="$(openssl rand -hex 24)" \
-     VAULT_EXCHANGE_URL="http://127.0.0.1:8000/vault/api/sessions/exchange" \
-     ./install-phpmyadmin.sh</code></pre>
+    <div class="step"><h3>1 · Download phpMyAdmin</h3>
+      <p>Fetches a pinned, SHA-256-verified release into <code>storage/app/dbvault-pma</code> and
+      overlays the signon config:</p>
+      <pre><code>php artisan dbvault:install-pma</code></pre>
     </div>
-    <div class="step"><h3>Copy the secret into the vault</h3>
-      <p>The script prints a signon secret. Put the <em>same</em> value in the vault host <code>.env</code>,
-      and point the vault at this phpMyAdmin:</p>
-      <pre><code>DBVAULT_SIGNON_SECRET=&lt;the printed secret&gt;
-DBVAULT_PMA_SIGNON_URL=http://your-host:8080/signon.php</code></pre>
+    <div class="step"><h3>2 · Generate the web-server block</h3>
+      <p>Auto-detects nginx vs Apache and the PHP-FPM socket, and prints a <em>fully-resolved</em>
+      block (real path, your <code>{vault-path}/pma</code> prefix, the signon secret, and
+      <code>PmaAbsoluteUri</code> from <code>APP_URL</code>). Paste it inside your app's existing
+      HTTPS <code>server {}</code> / <code>&lt;VirtualHost&gt;</code> block, then reload:</p>
+      <pre><code>php artisan dbvault:pma-vhost                # or --server=apache</code></pre>
+    </div>
+    <div class="step"><h3>3 · Set the secret in <code>.env</code></h3>
+      <p>Must match the value carried by the generated block, then <code>php artisan config:clear</code>.
+      Leave <code>DBVAULT_PMA_SIGNON_URL</code> unset — launch defaults to
+      <code>{vault-path}/pma/signon.php</code>:</p>
+      <pre><code>DBVAULT_SIGNON_SECRET=&lt;a long random string&gt;</code></pre>
     </div>
   </div>
-  <div class="note"><b>Production:</b> serve the phpMyAdmin directory with nginx/apache + PHP-FPM
-  instead of the built-in <code>php -S</code> dev server (pass <code>PMA_PORT=0</code> to skip serving).</div>
+  <div class="note"><b>If "Open phpMyAdmin" loops back to its own UI:</b> the exchange returned 403
+  because <code>DBVAULT_SIGNON_SECRET</code> is empty or doesn't match the vhost's value. This is the
+  most common failure. <b>404 at <code>/vault/pma</code>:</b> phpMyAdmin isn't installed (re-run
+  <code>dbvault:install-pma</code> — <code>storage/app/dbvault-pma</code> is git-ignored and cleared
+  by some deploys) or the vhost path is wrong (re-run <code>dbvault:pma-vhost</code>).</div>
 
   <h2 id="ca">3 · Certificate Authority <span class="badge b-opt">optional</span></h2>
   <p>Only needed for mTLS. The package can issue client certificates itself once it has a CA.
@@ -179,9 +190,10 @@ DbVault\Models\Device::create([
   </details>
 
   <h2 id="scripts">All scripts</h2>
-  <p>Every script is also in the package under <code>docs/scripts/</code>. Downloads here are the same files.</p>
+  <p>Every script is also in the package under <code>docs/scripts/</code>. Downloads here are the same files.
+  phpMyAdmin is set up with the <code>dbvault:install-pma</code> and <code>dbvault:pma-vhost</code> artisan
+  commands (see step 2) — no download needed.</p>
   <p>
-    <button class="dl" data-dl="install-phpmyadmin.sh">&#8681; install-phpmyadmin.sh</button>
     <button class="dl" data-dl="setup-nginx-mtls.sh">&#8681; setup-nginx-mtls.sh</button>
     <button class="dl" data-dl="setup-apache-mtls.sh">&#8681; setup-apache-mtls.sh</button>
   </p>
@@ -194,7 +206,9 @@ DbVault\Models\Device::create([
     <tr><td><code>DBVAULT_TARGET_DATABASE</code> / <code>DBVAULT_ALLOWED_DATABASES</code></td><td>Brokered target DB(s)</td></tr>
     <tr><td><code>DBVAULT_BROWSABLE_TABLES</code></td><td>Allowlist (empty = all); <code>DBVAULT_RESTRICTED_TABLES</code> = denylist</td></tr>
     <tr><td><code>DBVAULT_PROVISION_*</code></td><td>Admin MySQL creds for CREATE USER/GRANT on the target</td></tr>
-    <tr><td><code>DBVAULT_PMA_SIGNON_URL</code> / <code>DBVAULT_SIGNON_SECRET</code></td><td>phpMyAdmin signon URL + shared secret</td></tr>
+    <tr><td><code>DBVAULT_SIGNON_SECRET</code></td><td>Shared secret guarding the token exchange (must match the vhost value)</td></tr>
+    <tr><td><code>DBVAULT_PMA_PATH</code></td><td>Where phpMyAdmin is installed (default <code>storage/app/dbvault-pma</code>)</td></tr>
+    <tr><td><code>DBVAULT_PMA_SIGNON_URL</code></td><td>Override launch URL; leave unset for the native <code>{vault-path}/pma</code></td></tr>
     <tr><td><code>DBVAULT_CA_CERT</code> / <code>DBVAULT_CA_KEY</code></td><td>CA for issuing client certs</td></tr>
     <tr><td><code>DBVAULT_MIDDLEWARE</code></td><td><code>web</code> (default) or <code>vault.mtls,web</code> to enforce mTLS</td></tr>
   </table>
@@ -204,183 +218,6 @@ DbVault\Models\Device::create([
 </main>
 </div>
 
-<script type="text/plain" id="src:install-phpmyadmin.sh">#!/usr/bin/env bash
-#
-# DB Vault — phpMyAdmin (signon) installer   [REQUIRED]
-# ----------------------------------------------------------------------------
-# Downloads phpMyAdmin and configures it in &quot;signon&quot; auth mode so that clicking
-# &quot;phpMyAdmin&quot; in the DB Vault panel logs the user straight in as their
-# temporary, scoped MySQL account — no login form, password never shown.
-#
-# It installs two DB-Vault-specific files:
-#   - config.inc.php   -&gt; auth_type &#x27;signon&#x27;
-#   - signon.php       -&gt; exchanges the vault&#x27;s one-time token for the temp
-#                         credential via the vault&#x27;s /sessions/exchange API
-#
-# Usage:
-#   chmod +x install-phpmyadmin.sh
-#   sudo ./install-phpmyadmin.sh
-#
-# Configure via env vars:
-#   PMA_VERSION        phpMyAdmin release        (default 5.2.2)
-#   PMA_DIR            install target dir         (default /var/www/phpmyadmin)
-#   PMA_PORT           port for the built-in dev server (default 8080; 0 = skip serving)
-#   VAULT_EXCHANGE_URL vault token-exchange endpoint. This is where signon.php
-#                        calls the VAULT (server-to-server) — it is the URL of
-#                        your Laravel app, NOT of phpMyAdmin, and NOT the port
-#                        this script serves phpMyAdmin on. REQUIRED — no default,
-#                        because a wrong value here is the #1 setup failure.
-#                        Use the app&#x27;s real URL (the one it is served at), e.g.
-#                          https://myapp.example.com/vault/api/sessions/exchange
-#                        Point it at the app&#x27;s stable web server (nginx/apache),
-#                        NOT a `php artisan serve` dev server: that process reads
-#                        .env once at boot, so it serves a STALE signon secret
-#                        after you add DBVAULT_SIGNON_SECRET → 403 at exchange.
-#   VAULT_SIGNON_SECRET shared secret; MUST equal DBVAULT_SIGNON_SECRET in the
-#                        vault host app&#x27;s .env  (default: generated &amp; printed)
-#   VAULT_INSECURE_TLS  set to 1 ONLY for local/self-signed TLS (e.g. *.local):
-#                        disables cert verification in signon.php&#x27;s curl call.
-#                        Leave unset in production. (default: 0)
-#   VAULT_RESOLVE       optional curl --resolve entry &quot;host:port:ip&quot; so the PHP
-#                        process reaches the vault vhost without a DNS/hosts
-#                        entry, e.g. &quot;myapp.local:443:127.0.0.1&quot;. (default: none)
-# ----------------------------------------------------------------------------
-set -euo pipefail
-
-PMA_VERSION=&quot;${PMA_VERSION:-5.2.2}&quot;
-PMA_DIR=&quot;${PMA_DIR:-/var/www/phpmyadmin}&quot;
-PMA_PORT=&quot;${PMA_PORT:-8080}&quot;
-VAULT_EXCHANGE_URL=&quot;${VAULT_EXCHANGE_URL:-}&quot;
-VAULT_SIGNON_SECRET=&quot;${VAULT_SIGNON_SECRET:-$(head -c 24 /dev/urandom | base64 | tr -dc &#x27;A-Za-z0-9&#x27; | head -c 32)}&quot;
-VAULT_INSECURE_TLS=&quot;${VAULT_INSECURE_TLS:-0}&quot;
-VAULT_RESOLVE=&quot;${VAULT_RESOLVE:-}&quot;
-
-say() { printf &#x27;\033[1;36m==&gt;\033[0m %s\n&#x27; &quot;$1&quot;; }
-die() { printf &#x27;\033[1;31mERROR:\033[0m %s\n&#x27; &quot;$1&quot; &gt;&amp;2; exit 1; }
-
-command -v php  &gt;/dev/null || die &quot;php is required.&quot;
-command -v curl &gt;/dev/null || die &quot;curl is required.&quot;
-command -v unzip &gt;/dev/null || die &quot;unzip is required.&quot;
-
-if [ -z &quot;$VAULT_EXCHANGE_URL&quot; ]; then
-  die &quot;VAULT_EXCHANGE_URL is required. Set it to your app&#x27;s real token-exchange URL,
-       e.g. VAULT_EXCHANGE_URL=https://your-app.example.com/vault/api/sessions/exchange
-       (this is the VAULT/Laravel app URL — not phpMyAdmin, not the serve port).
-       Use the app&#x27;s stable nginx/apache URL, not a &#x27;php artisan serve&#x27; port.&quot;
-fi
-
-say &quot;Downloading phpMyAdmin ${PMA_VERSION}...&quot;
-tmp=&quot;$(mktemp -d)&quot;
-curl -fsSL -o &quot;$tmp/pma.zip&quot; \
-  &quot;https://files.phpmyadmin.net/phpMyAdmin/${PMA_VERSION}/phpMyAdmin-${PMA_VERSION}-english.zip&quot; \
-  || die &quot;download failed&quot;
-unzip -q &quot;$tmp/pma.zip&quot; -d &quot;$tmp&quot;
-
-say &quot;Installing into ${PMA_DIR}...&quot;
-mkdir -p &quot;$PMA_DIR&quot;
-cp -r &quot;$tmp/phpMyAdmin-${PMA_VERSION}-english/.&quot; &quot;$PMA_DIR/&quot;
-rm -rf &quot;$tmp&quot;
-
-blowfish=&quot;$(head -c 32 /dev/urandom | base64 | tr -dc &#x27;A-Za-z0-9&#x27; | head -c 32)&quot;
-
-say &quot;Writing config.inc.php (auth_type = signon)...&quot;
-cat &gt; &quot;$PMA_DIR/config.inc.php&quot; &lt;&lt;PHP
-&lt;?php
-declare(strict_types=1);
-// DB Vault signon configuration — generated by install-phpmyadmin.sh
-\$cfg[&#x27;blowfish_secret&#x27;] = &#x27;${blowfish}&#x27;;
-\$i = 1;
-\$cfg[&#x27;Servers&#x27;][\$i][&#x27;auth_type&#x27;]     = &#x27;signon&#x27;;
-\$cfg[&#x27;Servers&#x27;][\$i][&#x27;SignonSession&#x27;]  = &#x27;SignonSession&#x27;;
-\$cfg[&#x27;Servers&#x27;][\$i][&#x27;SignonURL&#x27;]      = &#x27;signon.php&#x27;;
-\$cfg[&#x27;Servers&#x27;][\$i][&#x27;host&#x27;]           = &#x27;127.0.0.1&#x27;;
-\$cfg[&#x27;Servers&#x27;][\$i][&#x27;port&#x27;]           = &#x27;3306&#x27;;
-\$cfg[&#x27;Servers&#x27;][\$i][&#x27;AllowNoPassword&#x27;] = false;
-\$cfg[&#x27;TempDir&#x27;] = sys_get_temp_dir().&#x27;/pma-tmp&#x27;;
-@mkdir(\$cfg[&#x27;TempDir&#x27;], 0700, true);
-PHP
-
-# Build the optional curl lines only when requested, so production installs
-# don&#x27;t carry insecure/local-only options.
-EXTRA_CURL=&quot;&quot;
-if [ &quot;$VAULT_INSECURE_TLS&quot; = &quot;1&quot; ]; then
-  EXTRA_CURL=&quot;${EXTRA_CURL}
-    // Local only (VAULT_INSECURE_TLS=1): self-signed TLS, verification off.
-    CURLOPT_SSL_VERIFYPEER =&gt; false,
-    CURLOPT_SSL_VERIFYHOST =&gt; false,&quot;
-fi
-if [ -n &quot;$VAULT_RESOLVE&quot; ]; then
-  EXTRA_CURL=&quot;${EXTRA_CURL}
-    // Pin the vault host so the PHP process needs no DNS/hosts entry.
-    CURLOPT_RESOLVE =&gt; [&#x27;${VAULT_RESOLVE}&#x27;],&quot;
-fi
-
-say &quot;Writing signon.php (token exchange bridge)...&quot;
-cat &gt; &quot;$PMA_DIR/signon.php&quot; &lt;&lt;PHP
-&lt;?php
-declare(strict_types=1);
-// DB Vault -&gt; phpMyAdmin signon bridge — generated by install-phpmyadmin.sh
-const VAULT_EXCHANGE_URL  = &#x27;${VAULT_EXCHANGE_URL}&#x27;;
-const VAULT_SIGNON_SECRET = &#x27;${VAULT_SIGNON_SECRET}&#x27;;
-
-session_name(&#x27;SignonSession&#x27;);
-session_start();
-
-\$token = \$_GET[&#x27;token&#x27;] ?? &#x27;&#x27;;
-if (\$token === &#x27;&#x27;) { http_response_code(400); exit(&#x27;Missing signon token. Launch from the DB Vault panel.&#x27;); }
-
-\$ch = curl_init(VAULT_EXCHANGE_URL);
-curl_setopt_array(\$ch, [
-    CURLOPT_POST =&gt; true, CURLOPT_RETURNTRANSFER =&gt; true, CURLOPT_TIMEOUT =&gt; 10,
-    CURLOPT_HTTPHEADER =&gt; [&#x27;Content-Type: application/json&#x27;,&#x27;Accept: application/json&#x27;,&#x27;X-DbVault-Signon: &#x27;.VAULT_SIGNON_SECRET],
-    CURLOPT_POSTFIELDS =&gt; json_encode([&#x27;token&#x27; =&gt; \$token]),${EXTRA_CURL}
-]);
-\$body = curl_exec(\$ch); \$status = curl_getinfo(\$ch, CURLINFO_HTTP_CODE); \$curlErr = curl_error(\$ch); curl_close(\$ch);
-
-// Distinguish the failure modes so a misconfiguration is diagnosable instead
-// of always showing the same &quot;session no longer valid&quot; message:
-//   0   -&gt; could not reach the vault (wrong VAULT_EXCHANGE_URL / DNS / TLS)
-//   403 -&gt; shared secret mismatch (VAULT_SIGNON_SECRET != app DBVAULT_SIGNON_SECRET)
-//   404/410 -&gt; token invalid, already used, expired, or session not active
-if (\$status !== 200) {
-    http_response_code(\$status === 0 ? 502 : \$status);
-    if (\$status === 0)   { exit(&#x27;Could not reach the vault at &#x27;.VAULT_EXCHANGE_URL.&#x27; (&#x27;.\$curlErr.&#x27;). Check VAULT_EXCHANGE_URL / DNS / TLS.&#x27;); }
-    if (\$status === 403) { exit(&#x27;Signon secret mismatch: VAULT_SIGNON_SECRET here must equal DBVAULT_SIGNON_SECRET in the vault app .env (then clear its config cache / restart the web process).&#x27;); }
-    exit(&#x27;This session is no longer valid (HTTP &#x27;.\$status.&#x27;). Return to DB Vault and launch again.&#x27;);
-}
-
-\$cred = json_decode((string) \$body, true);
-\$_SESSION[&#x27;PMA_single_signon_user&#x27;]      = \$cred[&#x27;username&#x27;];
-\$_SESSION[&#x27;PMA_single_signon_password&#x27;]  = \$cred[&#x27;password&#x27;];
-\$_SESSION[&#x27;PMA_single_signon_host&#x27;]      = \$cred[&#x27;host&#x27;];
-\$_SESSION[&#x27;PMA_single_signon_port&#x27;]      = (string) \$cred[&#x27;port&#x27;];
-\$_SESSION[&#x27;PMA_single_signon_cfgupdate&#x27;] = [&#x27;only_db&#x27; =&gt; \$cred[&#x27;database&#x27;]];
-session_write_close();
-header(&#x27;Location: ./index.php&#x27;);
-exit;
-PHP
-
-say &quot;Done. phpMyAdmin installed at ${PMA_DIR}&quot;
-echo
-echo &quot;  Next, in the VAULT host app&#x27;s .env, set BOTH of these and then run&quot;
-echo &quot;  \`php artisan config:clear\` (and restart the web process if it caches env):&quot;
-echo
-echo &quot;      # must byte-for-byte equal the secret baked into ${PMA_DIR}/signon.php&quot;
-echo &quot;      DBVAULT_SIGNON_SECRET=${VAULT_SIGNON_SECRET}&quot;
-echo &quot;      # the URL the BROWSER opens phpMyAdmin at (where you serve ${PMA_DIR})&quot;
-echo &quot;      DBVAULT_PMA_SIGNON_URL=http://&lt;pma-host&gt;:${PMA_PORT}/signon.php&quot;
-echo
-echo &quot;  signon.php will call the vault back at:&quot;
-echo &quot;      ${VAULT_EXCHANGE_URL}&quot;
-echo &quot;  (that must be the app&#x27;s real/stable URL, not a transient artisan-serve port.)&quot;
-echo
-
-if [ &quot;$PMA_PORT&quot; != &quot;0&quot; ]; then
-  say &quot;Serving phpMyAdmin on http://127.0.0.1:${PMA_PORT} (Ctrl+C to stop)&quot;
-  say &quot;In production, serve ${PMA_DIR} with nginx/apache + PHP-FPM instead.&quot;
-  exec php -S &quot;127.0.0.1:${PMA_PORT}&quot; -t &quot;$PMA_DIR&quot;
-fi
-</script>
 <script type="text/plain" id="src:setup-nginx-mtls.sh">#!/usr/bin/env bash
 #
 # DB Vault — nginx mTLS reverse proxy   [OPTIONAL]
