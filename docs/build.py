@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""
+Build the self-contained DB Vault setup guide (docs/index.html) by inlining the
+scripts from docs/scripts/. Re-run after editing any script so the downloadable
+copies on the page stay in sync:  python3 docs/build.py
+"""
+import html
+import pathlib
+
+DOCS = pathlib.Path(__file__).parent
+SCRIPTS = DOCS / "scripts"
+
+
+def read(name: str) -> str:
+    return (SCRIPTS / name).read_text()
+
+
+scripts = {
+    "install-phpmyadmin.sh": read("install-phpmyadmin.sh"),
+    "setup-nginx-mtls.sh": read("setup-nginx-mtls.sh"),
+    "setup-apache-mtls.sh": read("setup-apache-mtls.sh"),
+}
+
+
+def esc(s: str) -> str:
+    return html.escape(s)
+
+
+# Embed each script in a <script type="text/plain"> block (not executed), keyed
+# by filename, so inline JS can offer it as a Blob download and render it.
+embeds = "\n".join(
+    f'<script type="text/plain" id="src:{fn}">{esc(body)}</script>'
+    for fn, body in scripts.items()
+)
+
+PAGE = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB Vault — Setup Guide</title>
+<style>
+:root {{
+  --bg:#0f1729; --panel:#0f1729; --ink:#e7ecf5; --ink2:#9aa6c0; --line:#22304d;
+  --brand:#6366f1; --brand2:#8b5cf6; --ok:#059669; --warn:#b45309; --code:#0b1220;
+}}
+@media (prefers-color-scheme: light) {{
+  :root {{ --bg:#f6f7f9; --panel:#fff; --ink:#0f172a; --ink2:#475569; --line:#e7e9ee; --code:#0f1729; }}
+}}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }}
+.wrap {{ display:grid; grid-template-columns:250px 1fr; min-height:100vh; }}
+aside {{ border-right:1px solid var(--line); padding:24px 18px; position:sticky; top:0; height:100vh; overflow:auto; }}
+aside .brand {{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:16px; margin-bottom:20px; }}
+aside .brand .m {{ width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:grid;place-items:center;color:#fff; }}
+aside a {{ display:block; color:var(--ink2); text-decoration:none; padding:7px 10px; border-radius:8px; font-size:14px; }}
+aside a:hover {{ background:rgba(99,102,241,.12); color:var(--ink); }}
+aside .lbl {{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink2); margin:16px 10px 6px; opacity:.7; }}
+main {{ padding:40px 48px; max-width:900px; }}
+h1 {{ font-size:30px; letter-spacing:-.02em; margin:0 0 6px; }}
+h2 {{ font-size:22px; margin:38px 0 10px; padding-top:14px; border-top:1px solid var(--line); }}
+h3 {{ font-size:16px; margin:22px 0 8px; }}
+p, li {{ color:var(--ink); }}
+.sub {{ color:var(--ink2); font-size:16px; margin-bottom:8px; }}
+code {{ background:rgba(127,127,127,.16); padding:1px 6px; border-radius:5px; font-family:ui-monospace,Menlo,monospace; font-size:13px; }}
+pre {{ background:var(--code); color:#e7ecf5; padding:16px 18px; border-radius:10px; overflow:auto; position:relative; font-size:13px; line-height:1.55; }}
+pre code {{ background:none; padding:0; }}
+.copy {{ position:absolute; top:8px; right:8px; background:rgba(255,255,255,.1); color:#e7ecf5; border:1px solid rgba(255,255,255,.2); border-radius:6px; padding:3px 9px; font-size:12px; cursor:pointer; }}
+.copy:hover {{ background:rgba(255,255,255,.2); }}
+.badge {{ display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; vertical-align:middle; margin-left:8px; }}
+.b-req {{ background:rgba(5,150,105,.18); color:#10b981; }}
+.b-opt {{ background:rgba(148,163,184,.2); color:var(--ink2); }}
+.note {{ border-left:3px solid var(--brand); background:rgba(99,102,241,.08); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; }}
+.note.warn {{ border-color:#f59e0b; background:rgba(245,158,11,.1); }}
+.dl {{ display:inline-flex; align-items:center; gap:8px; background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; text-decoration:none; padding:10px 16px; border-radius:9px; font-weight:600; font-size:14px; border:0; cursor:pointer; margin:10px 0; }}
+.dl:hover {{ opacity:.92; }}
+.step {{ counter-increment:step; }}
+.step h3::before {{ content:counter(step); display:inline-grid; place-items:center; width:24px; height:24px; background:var(--brand); color:#fff; border-radius:50%; font-size:13px; margin-right:10px; }}
+.steps {{ counter-reset:step; }}
+table {{ border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; }}
+th,td {{ text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); }}
+th {{ color:var(--ink2); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
+details {{ border:1px solid var(--line); border-radius:9px; padding:10px 14px; margin:12px 0; }}
+summary {{ cursor:pointer; font-weight:600; }}
+.footer {{ margin-top:50px; padding-top:20px; border-top:1px solid var(--line); color:var(--ink2); font-size:13px; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+  <div class="brand"><span class="m">&#128274;</span> DB Vault</div>
+  <div class="lbl">Guide</div>
+  <a href="#overview">Overview</a>
+  <a href="#package">1 · Install the package</a>
+  <a href="#phpmyadmin">2 · phpMyAdmin <span class="badge b-req">required</span></a>
+  <div class="lbl">Optional — mTLS</div>
+  <a href="#ca">3 · Certificate Authority</a>
+  <a href="#nginx">4 · nginx proxy</a>
+  <a href="#apache">4b · apache proxy</a>
+  <a href="#enable">5 · Enable mTLS</a>
+  <div class="lbl">Reference</div>
+  <a href="#scripts">All scripts</a>
+  <a href="#env">Env reference</a>
+</aside>
+<main>
+  <h1>DB Vault — Setup Guide</h1>
+  <p class="sub">Install the access-broker package, wire up phpMyAdmin, and (optionally) add mutual-TLS device authentication.</p>
+
+  <div class="note">
+    <b>What the package provides vs. what you set up.</b> The composer package ships all the
+    <em>logic</em> (RBAC, 2FA, provisioning, cert issuance, the SPA). The steps below configure the
+    <em>environment</em> it runs in — a MySQL client to land in (phpMyAdmin), and optionally a
+    reverse proxy for mTLS. Only <b>phpMyAdmin</b> is required for the launch flow to work.
+  </div>
+
+  <h2 id="overview">Overview</h2>
+  <table>
+    <tr><th>Step</th><th>What</th><th>Needed?</th></tr>
+    <tr><td>1</td><td>Install <code>ak-codehub/db-vault</code> into your Laravel app</td><td>Required</td></tr>
+    <tr><td>2</td><td>phpMyAdmin in signon mode (where launched sessions land)</td><td><b>Required</b></td></tr>
+    <tr><td>3–5</td><td>CA + reverse-proxy mTLS + enforcement</td><td>Optional</td></tr>
+  </table>
+
+  <h2 id="package">1 · Install the package</h2>
+  <div class="steps">
+    <div class="step"><h3>Require via composer</h3>
+      <pre><code>composer require ak-codehub/db-vault</code></pre>
+    </div>
+    <div class="step"><h3>Configure the vault's own database</h3>
+      <p>The vault stores its tables on a dedicated connection, isolated from your app DB. In <code>.env</code>:</p>
+      <pre><code>DBVAULT_DB_DATABASE=dbvault
+DBVAULT_DB_HOST=127.0.0.1
+DBVAULT_DB_USERNAME=root
+DBVAULT_DB_PASSWORD=secret</code></pre>
+    </div>
+    <div class="step"><h3>Build the SPA, then install</h3>
+      <p>Build the front-end <em>before</em> installing (install publishes the built assets):</p>
+      <pre><code>npm install &amp;&amp; npm run build          # in the package dir
+php artisan db-vault:install            # migrates, seeds roles, creates first admin</code></pre>
+    </div>
+    <div class="step"><h3>Serve &amp; open</h3>
+      <pre><code>php artisan serve   #  &rarr; http://127.0.0.1:8000/vault</code></pre>
+    </div>
+  </div>
+
+  <h2 id="phpmyadmin">2 · phpMyAdmin (signon) <span class="badge b-req">required</span></h2>
+  <p>When a user launches a session, DB Vault mints a one-time token and sends them to phpMyAdmin,
+  which trades the token for the temporary MySQL credential and logs them in automatically — no
+  password ever shown. This script downloads phpMyAdmin and installs the DB-Vault signon config.</p>
+
+  <button class="dl" data-dl="install-phpmyadmin.sh">&#8681; Download install-phpmyadmin.sh</button>
+  <div class="steps">
+    <div class="step"><h3>Run it</h3>
+      <pre><code>chmod +x install-phpmyadmin.sh
+sudo VAULT_SIGNON_SECRET="$(openssl rand -hex 24)" \\
+     VAULT_EXCHANGE_URL="http://127.0.0.1:8000/vault/api/sessions/exchange" \\
+     ./install-phpmyadmin.sh</code></pre>
+    </div>
+    <div class="step"><h3>Copy the secret into the vault</h3>
+      <p>The script prints a signon secret. Put the <em>same</em> value in the vault host <code>.env</code>,
+      and point the vault at this phpMyAdmin:</p>
+      <pre><code>DBVAULT_SIGNON_SECRET=&lt;the printed secret&gt;
+DBVAULT_PMA_SIGNON_URL=http://your-host:8080/signon.php</code></pre>
+    </div>
+  </div>
+  <div class="note"><b>Production:</b> serve the phpMyAdmin directory with nginx/apache + PHP-FPM
+  instead of the built-in <code>php -S</code> dev server (pass <code>PMA_PORT=0</code> to skip serving).</div>
+
+  <h2 id="ca">3 · Certificate Authority <span class="badge b-opt">optional</span></h2>
+  <p>Only needed for mTLS. The package can issue client certificates itself once it has a CA.
+  Generate a local one with the built-in artisan command (no script needed):</p>
+  <pre><code>php artisan dbvault:make-ca
+# writes storage/app/dbvault-ca/{{ca.crt,ca.key}} — point .env at them:
+#   DBVAULT_CA_CERT=.../ca.crt
+#   DBVAULT_CA_KEY=.../ca.key</code></pre>
+  <p>Then issue per-user certs from <b>Admin &rarr; Devices &rarr; Issue certificate</b> in the panel.</p>
+
+  <h2 id="nginx">4 · nginx mTLS reverse proxy <span class="badge b-opt">optional</span></h2>
+  <p>Terminates HTTPS, verifies client certs against your CA, and forwards the result to the app.</p>
+  <button class="dl" data-dl="setup-nginx-mtls.sh">&#8681; Download setup-nginx-mtls.sh</button>
+  <pre><code>chmod +x setup-nginx-mtls.sh
+sudo CA_CERT=/path/to/storage/app/dbvault-ca/ca.crt \\
+     LISTEN_PORT=8443 APP_UPSTREAM=127.0.0.1:8000 \\
+     ./setup-nginx-mtls.sh</code></pre>
+
+  <h2 id="apache">4b · apache mTLS reverse proxy <span class="badge b-opt">optional</span></h2>
+  <p>Use instead of nginx if you run apache.</p>
+  <button class="dl" data-dl="setup-apache-mtls.sh">&#8681; Download setup-apache-mtls.sh</button>
+  <pre><code>chmod +x setup-apache-mtls.sh
+sudo CA_CERT=/path/to/ca.crt ./setup-apache-mtls.sh</code></pre>
+
+  <h2 id="enable">5 · Enable mTLS enforcement <span class="badge b-opt">optional</span></h2>
+  <p>Once a proxy is in front, turn on the gate in the vault host <code>.env</code>:</p>
+  <pre><code>DBVAULT_MIDDLEWARE="vault.mtls,web"
+DBVAULT_MTLS_REQUIRE_ENROLLED_DEVICE=true</code></pre>
+  <div class="note warn"><b>Do not enable this without a proxy in front.</b> <code>vault.mtls</code>
+  trusts cert headers a reverse proxy injects. On a bare <code>php artisan serve</code> every request
+  will 403.</div>
+  <div class="note"><b>Also trust the proxy</b> or the SPA renders blank (assets load as http). In
+  <code>bootstrap/app.php</code> &rarr; <code>withMiddleware()</code>:
+  <pre><code>$middleware-&gt;trustProxies(at: '*', headers: Request::HEADER_X_FORWARDED_FOR
+    | Request::HEADER_X_FORWARDED_HOST | Request::HEADER_X_FORWARDED_PORT
+    | Request::HEADER_X_FORWARDED_PROTO);</code></pre></div>
+  <details><summary>Bootstrapping: first cert without panel access</summary>
+    <p>Enrolling happens inside the gated panel — so issue the first admin cert out-of-band via tinker,
+    then log in and manage the rest from the UI.</p>
+    <pre><code>$u = DbVault\\Models\\User::where('email','admin@example.com')-&gt;first();
+$r = app(DbVault\\Services\\CertificateAuthorityService::class)-&gt;issueForUser($u,'bootstrap');
+file_put_contents('admin.p12', $r['p12']);   // install; password in $r['password']
+DbVault\\Models\\Device::create([
+  'user_id'=&gt;$u-&gt;id,'cert_dn'=&gt;$r['dn'],'cert_fingerprint'=&gt;$r['fingerprint'],
+  'label'=&gt;'bootstrap','enrolled_at'=&gt;now(),
+]);</code></pre>
+  </details>
+
+  <h2 id="scripts">All scripts</h2>
+  <p>Every script is also in the package under <code>docs/scripts/</code>. Downloads here are the same files.</p>
+  <p>
+    <button class="dl" data-dl="install-phpmyadmin.sh">&#8681; install-phpmyadmin.sh</button>
+    <button class="dl" data-dl="setup-nginx-mtls.sh">&#8681; setup-nginx-mtls.sh</button>
+    <button class="dl" data-dl="setup-apache-mtls.sh">&#8681; setup-apache-mtls.sh</button>
+  </p>
+
+  <h2 id="env">Env reference</h2>
+  <table>
+    <tr><th>Variable</th><th>Purpose</th></tr>
+    <tr><td><code>DBVAULT_DB_*</code></td><td>Vault's dedicated storage DB (isolated from app DB)</td></tr>
+    <tr><td><code>DBVAULT_INTROSPECTION_CONNECTION</code></td><td>Connection to list target tables in the request form</td></tr>
+    <tr><td><code>DBVAULT_TARGET_DATABASE</code> / <code>DBVAULT_ALLOWED_DATABASES</code></td><td>Brokered target DB(s)</td></tr>
+    <tr><td><code>DBVAULT_BROWSABLE_TABLES</code></td><td>Allowlist (empty = all); <code>DBVAULT_RESTRICTED_TABLES</code> = denylist</td></tr>
+    <tr><td><code>DBVAULT_PROVISION_*</code></td><td>Admin MySQL creds for CREATE USER/GRANT on the target</td></tr>
+    <tr><td><code>DBVAULT_PMA_SIGNON_URL</code> / <code>DBVAULT_SIGNON_SECRET</code></td><td>phpMyAdmin signon URL + shared secret</td></tr>
+    <tr><td><code>DBVAULT_CA_CERT</code> / <code>DBVAULT_CA_KEY</code></td><td>CA for issuing client certs</td></tr>
+    <tr><td><code>DBVAULT_MIDDLEWARE</code></td><td><code>web</code> (default) or <code>vault.mtls,web</code> to enforce mTLS</td></tr>
+  </table>
+
+  <div class="footer">DB Vault setup guide · scripts verified against phpMyAdmin 5.2.2, nginx, apache.
+  Regenerate this page with <code>python3 docs/build.py</code> after editing any script.</div>
+</main>
+</div>
+
+{embeds}
+<script>
+// Offer each embedded script as a real file download (self-contained; no server).
+document.querySelectorAll('[data-dl]').forEach(function (btn) {{
+  btn.addEventListener('click', function () {{
+    var name = btn.getAttribute('data-dl');
+    var src = document.getElementById('src:' + name);
+    if (!src) return;
+    var blob = new Blob([src.textContent], {{ type: 'text/x-shellscript' }});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  }});
+}});
+// Add copy buttons to every code block.
+document.querySelectorAll('pre').forEach(function (pre) {{
+  var b = document.createElement('button');
+  b.className = 'copy'; b.textContent = 'Copy';
+  b.addEventListener('click', function () {{
+    navigator.clipboard.writeText(pre.innerText.replace(/Copy$/, '').trim());
+    b.textContent = 'Copied'; setTimeout(function () {{ b.textContent = 'Copy'; }}, 1200);
+  }});
+  pre.appendChild(b);
+}});
+</script>
+</body>
+</html>
+"""
+
+(DOCS / "index.html").write_text(PAGE)
+print(f"Wrote {DOCS / 'index.html'} ({len(PAGE)} bytes, {len(scripts)} scripts embedded)")

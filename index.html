@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!--
+    Dev-only harness for `npm run dev`.
+
+    In production this bundle is served by the db-vault Composer package's
+    own Blade boot view, which sets `window.DbVault` from server-side config
+    before loading the built `public/app.js` / `public/app.css`. This file
+    stands in for that boot view during local `vite` development only — it
+    is never part of the `vite build` output (the build entry is pinned to
+    resources/js/app.js via vite.config.js `build.rollupOptions.input`, not
+    to this HTML file).
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DB Vault (dev)</title>
+    <script>
+        window.DbVault = {
+            basePath: '/',
+            apiBase: 'http://localhost:8000/vault/api',
+            csrf: '',
+        };
+    </script>
+</head>
+<body class="antialiased">
+    <div id="db-vault-app"></div>
+    <script type="module" src="/resources/js/app.js"></script>
+</body>
+</html>

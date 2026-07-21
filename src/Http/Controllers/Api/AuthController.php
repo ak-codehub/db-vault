@@ -1,0 +1,155 @@
+<?php
+
+declare(strict_types=1);
+
+namespace DbVault\Http\Controllers\Api;
+
+use DbVault\Enums\RequestStatus;
+use DbVault\Enums\SessionStatus;
+use DbVault\Http\Controllers\Controller;
+use DbVault\Http\Resources\UserResource;
+use DbVault\Models\AccessRequest;
+use DbVault\Models\DbSession;
+use DbVault\Models\User;
+use DbVault\Services\ActivityLogger;
+use DbVault\Services\TwoFactorService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
+
+/**
+ * Cookie-session authentication for the vault's own guard. Mirrors what
+ * Fortify/Sanctum SPA auth provides, but as a plain JSON API (no Inertia):
+ *
+ *   POST login                 -> two-factor-required | authenticated
+ *   POST two-factor-challenge  -> authenticated
+ *   POST logout                -> ok
+ *   GET  me                    -> current user + server label + nav counts
+ *
+ * Two-factor is opt-in per user (DbVault\Models\User::hasEnabledTwoFactorAuthentication()).
+ * When required, an email OTP is issued as a fallback channel and the
+ * challenge additionally accepts a TOTP code or a single-use recovery code.
+ */
+class AuthController extends Controller
+{
+    /**
+     * Session key holding the pending user id between the credential step and
+     * the two-factor challenge.
+     */
+    private const TWO_FACTOR_SESSION_KEY = 'db-vault.two-factor.id';
+
+    public function login(Request $request, TwoFactorService $twoFactor, ActivityLogger $logger): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'string', 'email'],
+            'password' => ['required', 'string'],
+        ]);
+
+        $user = User::where('email', $validated['email'])->first();
+
+        if (! $user || ! $user->is_active || ! Hash::check($validated['password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'email' => ['These credentials do not match our records.'],
+            ]);
+        }
+
+        if ($user->hasEnabledTwoFactorAuthentication()) {
+            $request->session()->put(self::TWO_FACTOR_SESSION_KEY, $user->id);
+
+            // Issue the email fallback code; the challenge also accepts a
+            // TOTP code from the user's authenticator app.
+            $twoFactor->issueEmailOtp($user);
+
+            return response()->json(['status' => 'two-factor-required']);
+        }
+
+        return $this->completeLogin($request, $user, $logger);
+    }
+
+    public function twoFactorChallenge(Request $request, TwoFactorService $twoFactor, ActivityLogger $logger): JsonResponse
+    {
+        $validated = $request->validate([
+            'code' => ['nullable', 'string'],
+            'recovery_code' => ['nullable', 'string'],
+        ]);
+
+        $userId = $request->session()->get(self::TWO_FACTOR_SESSION_KEY);
+
+        if (! $userId || ! ($user = User::find($userId))) {
+            return response()->json(['message' => 'No two-factor challenge is in progress.'], 419);
+        }
+
+        $passed = false;
+
+        if (! empty($validated['recovery_code'])) {
+            $passed = $twoFactor->verifyRecoveryCode($user, $validated['recovery_code']);
+        } elseif (! empty($validated['code'])) {
+            $passed = $twoFactor->verifyTotp($user, $validated['code'])
+                || $twoFactor->verifyEmailOtp($user, $validated['code']);
+        }
+
+        if (! $passed) {
+            throw ValidationException::withMessages([
+                'code' => ['The provided two-factor code was invalid.'],
+            ]);
+        }
+
+        $request->session()->forget(self::TWO_FACTOR_SESSION_KEY);
+
+        return $this->completeLogin($request, $user, $logger, ['via' => 'two-factor']);
+    }
+
+    public function logout(Request $request, ActivityLogger $logger): JsonResponse
+    {
+        $guard = (string) config('dbvault.guard', 'vault');
+        $user = Auth::guard($guard)->user();
+
+        $logger->log($user instanceof User ? $user : null, 'auth.logout', $user instanceof User ? $user : null);
+
+        Auth::guard($guard)->logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::guard(config('dbvault.guard', 'vault'))->user();
+        $user->loadMissing('roles');
+
+        return response()->json([
+            'user' => (new UserResource($user))->resolve($request),
+            'server' => [
+                'label' => config('dbvault.server_label'),
+            ],
+            'counts' => [
+                'pendingApprovals' => AccessRequest::where('status', RequestStatus::PendingApproval)->count(),
+                'activeSessions' => DbSession::where('status', SessionStatus::Active)->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * Log the user into the vault guard, rotate the session, record the
+     * login, and return the authenticated payload the SPA's useAuth composable
+     * expects.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    private function completeLogin(Request $request, User $user, ActivityLogger $logger, array $meta = []): JsonResponse
+    {
+        Auth::guard(config('dbvault.guard', 'vault'))->login($user);
+        $request->session()->regenerate();
+
+        $logger->log($user, 'auth.login', $user, $meta);
+
+        return response()->json([
+            'status' => 'authenticated',
+            'user' => (new UserResource($user->loadMissing('roles')))->resolve($request),
+        ]);
+    }
+}

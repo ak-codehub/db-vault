@@ -1,0 +1,285 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import '@tabler/icons-webfont/dist/tabler-icons.min.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    html {
+        -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+        @apply bg-page text-ink font-sans text-[14px] leading-[1.5];
+    }
+
+    /* Native checkboxes: Tailwind Preflight strips their default appearance,
+       leaving an empty box with no visible checked state. Restore a proper
+       brand-tinted control (used by the role picker, table filters, etc.). */
+    input[type='checkbox'],
+    input[type='radio'] {
+        @apply w-[16px] h-[16px] cursor-pointer align-middle;
+        accent-color: theme('colors.brand.DEFAULT', #6366f1);
+    }
+}
+
+@layer components {
+    /* ---------- Cards ---------- */
+    .card {
+        @apply bg-panel border border-line rounded-xl shadow-card;
+    }
+
+    .card-h {
+        @apply flex items-center justify-between px-[18px] py-4 border-b border-line-2;
+    }
+
+    .card-h h3 {
+        @apply text-[15px] font-semibold text-ink;
+    }
+
+    .card-h a,
+    .card-h .card-h-link {
+        @apply text-brand-600 text-xs font-semibold no-underline hover:underline;
+    }
+
+    /* ---------- Buttons ---------- */
+    .btn {
+        @apply inline-flex items-center gap-[7px] rounded-[10px] px-[15px] py-[9px] font-semibold text-[13px] cursor-pointer border border-transparent transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    }
+
+    .btn i {
+        @apply text-[17px];
+    }
+
+    .btn-primary {
+        @apply bg-brand text-white hover:bg-brand-600;
+    }
+
+    .btn-ghost {
+        @apply bg-panel text-ink border-line hover:bg-page;
+    }
+
+    .btn-danger {
+        @apply bg-bad-bg text-bad border-bad/20 hover:bg-bad hover:text-white;
+    }
+
+    .mini {
+        @apply px-3 py-[6px] text-xs rounded-lg font-semibold cursor-pointer border border-line bg-panel text-ink hover:bg-page transition-colors;
+    }
+
+    .mini-ok {
+        @apply bg-brand text-white border-brand hover:bg-brand-600;
+    }
+
+    .mini-bad {
+        @apply hover:bg-bad-bg hover:text-bad hover:border-bad/30;
+    }
+
+    /* ---------- Badges ---------- */
+    .badge {
+        @apply inline-flex items-center gap-[5px] text-xxs font-semibold px-[9px] py-[3px] rounded-full whitespace-nowrap;
+    }
+
+    .badge::before {
+        content: '';
+        @apply w-[6px] h-[6px] rounded-full;
+        background: currentColor;
+    }
+
+    .badge-ok {
+        @apply bg-ok-bg text-ok;
+    }
+
+    .badge-warn {
+        @apply bg-warn-bg text-warn;
+    }
+
+    .badge-bad {
+        @apply bg-bad-bg text-bad;
+    }
+
+    .badge-mute {
+        @apply bg-line-2 text-ink-2;
+    }
+
+    /* ---------- Avatar ---------- */
+    .avatar {
+        @apply w-[34px] h-[34px] rounded-full bg-brand-100 text-brand-600 grid place-items-center font-semibold text-[13px] shrink-0;
+    }
+
+    /* ---------- Forms ---------- */
+    .field label {
+        @apply block text-xs font-semibold text-ink-2 mb-[6px];
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+        @apply w-full border border-line rounded-[9px] px-3 py-[9px] font-sans text-[13px] text-ink bg-panel outline-none transition;
+    }
+
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus {
+        @apply border-brand ring-[3px] ring-brand-50;
+    }
+
+    /* ---------- Privilege matrix checkbox ---------- */
+    .chk {
+        @apply w-[18px] h-[18px] rounded-[5px] border-[1.5px] border-line inline-grid place-items-center cursor-pointer text-transparent transition-colors;
+    }
+
+    .chk.on {
+        @apply bg-brand border-brand text-white;
+    }
+
+    .chk i {
+        @apply text-[13px];
+    }
+
+    /* ---------- Note callout ---------- */
+    .note {
+        @apply flex gap-[9px] items-start bg-brand-50 border border-brand-100 rounded-[10px] px-[13px] py-[11px] text-xs text-brand-600;
+    }
+
+    .note i {
+        @apply text-[17px] mt-[1px] shrink-0;
+    }
+
+    /* ---------- Table ---------- */
+    .tbl {
+        @apply w-full border-collapse;
+    }
+
+    .tbl th {
+        @apply text-left text-xxs font-semibold text-ink-3 uppercase tracking-[.05em] px-[18px] py-[11px] border-b border-line-2;
+    }
+
+    .tbl td {
+        @apply px-[18px] py-[13px] border-b border-line-2 text-[13px] text-ink;
+    }
+
+    .tbl tr:last-child td {
+        @apply border-b-0;
+    }
+
+    .mono {
+        @apply font-mono text-xs text-ink-2;
+    }
+
+    /* ---------- Sidebar nav ---------- */
+    .nav-label {
+        @apply text-sidebar-ink2 text-xxs font-semibold uppercase tracking-[.06em] px-[10px] pt-[14px] pb-[6px];
+    }
+
+    .nav-link {
+        @apply flex items-center gap-[11px] px-[10px] py-[9px] rounded-[9px] text-sidebar-ink no-underline font-medium text-[13.5px] mb-[2px] transition-colors;
+    }
+
+    .nav-link i {
+        @apply text-[19px] text-sidebar-ink2;
+    }
+
+    .nav-link:hover {
+        @apply bg-sidebar-2 text-white;
+    }
+
+    .nav-link.active {
+        @apply bg-brand text-white;
+    }
+
+    .nav-link.active i {
+        @apply text-white;
+    }
+
+    .nav-link .count {
+        @apply ml-auto bg-sidebar-2 text-sidebar-ink text-xxs font-semibold px-[7px] py-[1px] rounded-full;
+    }
+
+    .nav-link.active .count {
+        @apply bg-white/20 text-white;
+    }
+
+    /* ---------- Page head ---------- */
+    .page-head {
+        @apply flex items-end justify-between mb-[22px] gap-4 flex-wrap;
+    }
+
+    .page-head h1 {
+        @apply text-[22px] font-semibold tracking-[-.02em] text-ink;
+    }
+
+    .page-head p {
+        @apply text-ink-2 text-[13.5px] mt-[3px];
+    }
+
+    /* ---------- Tabs ---------- */
+    .tabs {
+        @apply flex gap-1 bg-panel border border-line rounded-[11px] p-1 shadow-card w-fit;
+    }
+
+    .tabs a,
+    .tabs button {
+        @apply border-0 bg-transparent font-sans text-[13px] font-semibold text-ink-2 px-4 py-2 rounded-lg cursor-pointer no-underline transition-colors;
+    }
+
+    .tabs a.active,
+    .tabs button.active {
+        @apply bg-brand text-white;
+    }
+
+    /* ---------- User cell ---------- */
+    .u {
+        @apply flex items-center gap-[10px];
+    }
+
+    .u b {
+        @apply font-semibold text-[13px] text-ink;
+    }
+
+    .u span {
+        @apply block text-ink-3 text-[11.5px];
+    }
+
+    /* ---------- Approval list item ---------- */
+    .appr {
+        @apply px-[18px] py-[14px] border-b border-line-2;
+    }
+
+    .appr:last-child {
+        @apply border-b-0;
+    }
+
+    .appr .top {
+        @apply flex items-center gap-[10px] mb-[10px];
+    }
+
+    .appr .top b {
+        @apply text-[13px] font-semibold;
+    }
+
+    .appr .top span {
+        @apply text-ink-3 text-xxs ml-auto;
+    }
+
+    .appr .rq {
+        @apply text-[12.5px] text-ink-2 mb-[11px];
+    }
+
+    .appr .rq code {
+        @apply bg-page border border-line rounded-[5px] px-[6px] py-[1px] text-xxs text-ink font-mono;
+    }
+
+    .appr .acts {
+        @apply flex gap-2;
+    }
+
+    .link-btn {
+        @apply text-brand-600 font-semibold text-xs no-underline inline-flex items-center gap-1 hover:underline;
+    }
+
+    .forbidden {
+        @apply text-ink-3 line-through;
+    }
+}
