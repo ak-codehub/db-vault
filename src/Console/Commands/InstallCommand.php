@@ -64,13 +64,38 @@ class InstallCommand extends Command
 
     protected function runMigrations(): void
     {
-        // Each vault migration binds itself to config('dbvault.connection')
-        // (see its constructor), so Schema builds every vault_* table on the
-        // vault's own database regardless of the host's default connection.
-        // A plain migrate is therefore safe: host migrations stay on the
-        // host connection, vault migrations self-route to the vault one.
-        Artisan::call('migrate', ['--force' => true]);
-        $this->components->task('Ran vault migrations on the "'.config('dbvault.connection').'" connection');
+        $connection = config('dbvault.connection');
+
+        // Run ONLY the package's migrations, and put BOTH the tables and the
+        // migration-tracking repository on the vault connection. This keeps
+        // "has this migration run?" bookkeeping in the same database as the
+        // tables — otherwise the migrator reads the host's default `migrations`
+        // table, can decide "Nothing to migrate" (e.g. after an earlier
+        // attempt), and skip creating the vault_* tables while still exiting 0.
+        $options = [
+            '--path' => 'vendor/ak-codehub/db-vault/database/migrations',
+            '--realpath' => false,
+            '--force' => true,
+        ];
+
+        if ($connection) {
+            $options['--database'] = $connection;
+        }
+
+        $exit = Artisan::call('migrate', $options);
+
+        // If the package isn't installed under vendor/ (e.g. path-repo dev
+        // symlink or a differently-named install), fall back to a plain
+        // migrate on the vault connection so the auto-discovered package
+        // migrations still run there.
+        if ($exit !== 0) {
+            Artisan::call('migrate', array_filter([
+                '--database' => $connection ?: null,
+                '--force' => true,
+            ], static fn ($v) => $v !== null));
+        }
+
+        $this->components->task('Ran vault migrations on the "'.$connection.'" connection');
     }
 
     protected function seedRoles(): void
