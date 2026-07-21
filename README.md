@@ -26,15 +26,16 @@ DBVAULT_DB_DATABASE=dbvault
 
 (You don't need to create the database yourself — the installer does it for you.)
 
-### 3. Run the installer
+### 3. Run the installer, then create your admin
 
 ```bash
-php artisan db-vault:install
+php artisan db-vault:install     # creates the storage DB if missing, migrates, seeds roles
+php artisan db-vault:admin       # prompts for name / email / password
 ```
 
-This creates the storage database if missing, runs the vault migrations, seeds roles (developer / approver / admin / auditor), and prompts you to create the first admin. It is safe to re-run.
+`db-vault:install` never prompts (safe in CI / piped runs); it only sets up the schema. Creating a human admin is a separate command, `db-vault:admin`, which you can also run later to add more admins. Both are safe to re-run.
 
-> Non-interactive (CI): set `DBVAULT_ADMIN_NAME`, `DBVAULT_ADMIN_EMAIL`, `DBVAULT_ADMIN_PASSWORD` in `.env` and run `php artisan db-vault:install --no-interaction`.
+> Non-interactive (CI): pass `--name/--email/--password` to `db-vault:admin`, or set `DBVAULT_ADMIN_NAME/EMAIL/PASSWORD` (install then creates the first admin from them automatically).
 
 ### 4. Point the vault at the database it brokers
 
@@ -103,10 +104,10 @@ DBVAULT_PMA_SIGNON_URL=https://pma.example.com/signon.php
 **Local dev with a self-signed cert** (e.g. `*.local`): add two **local-only** flags so `signon.php`'s curl reaches the vault without a public cert or DNS entry (they are omitted from the generated file unless set — never use them in production):
 
 ```bash
-sudo VAULT_EXCHANGE_URL="https://oms.local/vault/api/sessions/exchange" \
+sudo VAULT_EXCHANGE_URL="https://myapp.local/vault/api/sessions/exchange" \
      VAULT_SIGNON_SECRET="$(openssl rand -hex 24)" \
      VAULT_INSECURE_TLS=1 \
-     VAULT_RESOLVE="oms.local:443:127.0.0.1" \
+     VAULT_RESOLVE="myapp.local:443:127.0.0.1" \
      ./install-phpmyadmin.sh
 ```
 

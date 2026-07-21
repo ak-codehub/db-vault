@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DbVault;
 
+use DbVault\Console\Commands\AdminCommand;
 use DbVault\Console\Commands\DropExpiredDbSessions;
 use DbVault\Console\Commands\InstallCommand;
 use DbVault\Console\Commands\MakeCertificateAuthority;
@@ -73,6 +74,7 @@ class DbVaultServiceProvider extends ServiceProvider
 
             $this->commands([
                 InstallCommand::class,
+                AdminCommand::class,
                 DropExpiredDbSessions::class,
                 MakeCertificateAuthority::class,
             ]);

@@ -13,29 +13,25 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
-use function Laravel\Prompts\confirm;
-use function Laravel\Prompts\password;
-use function Laravel\Prompts\text;
-
 /**
- * Guided first-time setup for the db-vault package inside a host Laravel 12
- * app: publish the config + compiled SPA assets, run the vault migrations,
- * seed the RBAC roles, and create the first admin user. Every step is
- * idempotent — re-running is safe and skips work already done.
+ * Guided first-time setup for the db-vault package: publish the config +
+ * compiled SPA assets, ensure/seed the vault storage database, run the vault
+ * migrations, and seed the RBAC roles. Every step is idempotent — re-running
+ * is safe and skips work already done.
+ *
+ * This command NEVER prompts, so it is safe in CI / piped / unattended runs.
+ * Creating the first admin is a separate concern handled by `db-vault:admin`
+ * (which prompts). As a convenience, if DBVAULT_ADMIN_NAME/EMAIL/PASSWORD are
+ * all set, install creates the first admin from them non-interactively.
  *
  * Infrastructure (Secrets Manager, IAM, the RDS audit plugin, the mTLS CA,
- * nginx, phpMyAdmin signon) is out of scope here — see Phase-0-Infra-Runbook.md
- * and DB-Vault-Design.md.
- *
- * With --no-interaction, prompts are skipped and the first admin is created
- * from DBVAULT_ADMIN_NAME / DBVAULT_ADMIN_EMAIL / DBVAULT_ADMIN_PASSWORD if
- * all three are present.
+ * nginx, phpMyAdmin signon) is out of scope here — see the README.
  */
 class InstallCommand extends Command
 {
     protected $signature = 'db-vault:install {--force : Overwrite any published files that already exist}';
 
-    protected $description = 'Publish assets/config, migrate, seed roles, and create the first DB Vault admin.';
+    protected $description = 'Publish assets/config, ensure DB, migrate, and seed roles (never prompts).';
 
     public function handle(): int
     {
@@ -283,18 +279,26 @@ class InstallCommand extends Command
         return true;
     }
 
+    /**
+     * Install never prompts for an admin — it may run in CI/piped/unattended,
+     * where a password prompt hangs. If all DBVAULT_ADMIN_* env vars are set we
+     * create the first admin non-interactively as a convenience; otherwise we
+     * point the operator at the dedicated `db-vault:admin` command, which
+     * handles interactive creation (and adding more admins later).
+     */
     protected function createFirstAdmin(): void
     {
         if (User::whereHas('roles', fn ($q) => $q->where('name', 'admin'))->exists()) {
-            $this->components->info('An admin user already exists — skipping first-admin creation.');
-
+            // Already have an admin; nothing to do.
             return;
         }
 
-        [$name, $email, $plainPassword] = $this->resolveAdminDetails();
+        $name = env('DBVAULT_ADMIN_NAME');
+        $email = env('DBVAULT_ADMIN_EMAIL');
+        $plainPassword = env('DBVAULT_ADMIN_PASSWORD');
 
-        if ($name === null || $email === null || $plainPassword === null) {
-            $this->components->warn('No admin created. Run `php artisan db-vault:install` interactively, or set DBVAULT_ADMIN_* env vars.');
+        if (! $name || ! $email || ! $plainPassword) {
+            $this->components->info('No admin yet. Create one with:  php artisan db-vault:admin');
 
             return;
         }
@@ -307,31 +311,7 @@ class InstallCommand extends Command
         $adminRoleId = Role::where('name', 'admin')->value('id');
         $user->roles()->syncWithoutDetaching([$adminRoleId]);
 
-        $this->components->task("Created admin user {$email}");
-    }
-
-    /**
-     * @return array{0: ?string, 1: ?string, 2: ?string}
-     */
-    protected function resolveAdminDetails(): array
-    {
-        if (! $this->input->isInteractive()) {
-            return [
-                env('DBVAULT_ADMIN_NAME'),
-                env('DBVAULT_ADMIN_EMAIL'),
-                env('DBVAULT_ADMIN_PASSWORD'),
-            ];
-        }
-
-        if (! confirm('Create the first admin user now?', default: true)) {
-            return [null, null, null];
-        }
-
-        return [
-            text('Admin name', required: true),
-            text('Admin email', required: true),
-            password('Admin password', required: true),
-        ];
+        $this->components->task("Created admin user {$email} (from DBVAULT_ADMIN_* env)");
     }
 
     protected function printNextSteps(): void
@@ -340,7 +320,11 @@ class InstallCommand extends Command
 
         $this->components->info('DB Vault is installed.');
         $this->line("  • Panel URL:  /{$path}");
-        $this->line('  • Front it with the mTLS nginx vhost from Phase-0-Infra-Runbook.md');
+
+        if (! User::whereHas('roles', fn ($q) => $q->where('name', 'admin'))->exists()) {
+            $this->line('  • Create your first admin:  php artisan db-vault:admin');
+        }
+
         $this->line('  • Schedule cleanup:  Schedule::command(\'dbvault:drop-expired-sessions\')->everyFiveMinutes();');
     }
 }

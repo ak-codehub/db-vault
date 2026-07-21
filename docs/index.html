@@ -231,7 +231,7 @@ DbVault\Models\Device::create([
 #                        this script serves phpMyAdmin on. REQUIRED — no default,
 #                        because a wrong value here is the #1 setup failure.
 #                        Use the app&#x27;s real URL (the one it is served at), e.g.
-#                          https://oms.example.com/vault/api/sessions/exchange
+#                          https://myapp.example.com/vault/api/sessions/exchange
 #                        Point it at the app&#x27;s stable web server (nginx/apache),
 #                        NOT a `php artisan serve` dev server: that process reads
 #                        .env once at boot, so it serves a STALE signon secret
@@ -243,7 +243,7 @@ DbVault\Models\Device::create([
 #                        Leave unset in production. (default: 0)
 #   VAULT_RESOLVE       optional curl --resolve entry &quot;host:port:ip&quot; so the PHP
 #                        process reaches the vault vhost without a DNS/hosts
-#                        entry, e.g. &quot;oms.local:443:127.0.0.1&quot;. (default: none)
+#                        entry, e.g. &quot;myapp.local:443:127.0.0.1&quot;. (default: none)
 # ----------------------------------------------------------------------------
 set -euo pipefail
 

@@ -25,7 +25,7 @@
 #                        this script serves phpMyAdmin on. REQUIRED — no default,
 #                        because a wrong value here is the #1 setup failure.
 #                        Use the app's real URL (the one it is served at), e.g.
-#                          https://oms.example.com/vault/api/sessions/exchange
+#                          https://myapp.example.com/vault/api/sessions/exchange
 #                        Point it at the app's stable web server (nginx/apache),
 #                        NOT a `php artisan serve` dev server: that process reads
 #                        .env once at boot, so it serves a STALE signon secret
@@ -37,7 +37,7 @@
 #                        Leave unset in production. (default: 0)
 #   VAULT_RESOLVE       optional curl --resolve entry "host:port:ip" so the PHP
 #                        process reaches the vault vhost without a DNS/hosts
-#                        entry, e.g. "oms.local:443:127.0.0.1". (default: none)
+#                        entry, e.g. "myapp.local:443:127.0.0.1". (default: none)
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
