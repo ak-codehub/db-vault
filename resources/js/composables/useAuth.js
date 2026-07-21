@@ -11,6 +11,10 @@ const state = reactive({
     loaded: false, // has fetchMe() resolved at least once (success or 401)?
     loading: false,
     fetchPromise: null, // in-flight GET /me, so concurrent guards share one request
+    // Pending forced-enrollment payload (QR svg + recovery codes) handed from
+    // login()'s 'two-factor-setup-required' response to the setup view. Held
+    // in memory only — never persisted or put in the URL.
+    pendingSetup: null,
 });
 
 function applyMe(data) {
@@ -75,11 +79,23 @@ export function useAuth() {
         if (data.status === 'authenticated') {
             await fetchMe({ force: true });
         }
-        return data; // {status: 'two-factor-required' | 'authenticated', user?}
+        if (data.status === 'two-factor-setup-required') {
+            state.pendingSetup = { qr: data.qr, secret: data.secret, recovery_codes: data.recovery_codes };
+        }
+        return data; // {status: 'two-factor-required' | 'two-factor-setup-required' | 'authenticated', ...}
     }
 
     async function verifyTwoFactor(payload) {
         const data = await authApi.twoFactorChallenge(payload);
+        if (data.csrf) setCsrfToken(data.csrf);
+        if (data.status === 'authenticated') {
+            await fetchMe({ force: true });
+        }
+        return data;
+    }
+
+    async function confirmTwoFactorSetup(payload) {
+        const data = await authApi.twoFactorSetup(payload);
         if (data.csrf) setCsrfToken(data.csrf);
         if (data.status === 'authenticated') {
             await fetchMe({ force: true });
@@ -101,6 +117,7 @@ export function useAuth() {
     return {
         state,
         user: computed(() => state.user),
+        pendingSetup: computed(() => state.pendingSetup),
         server: computed(() => state.server),
         counts: computed(() => state.counts),
         isAuthenticated,
@@ -109,6 +126,7 @@ export function useAuth() {
         fetchMe,
         login,
         verifyTwoFactor,
+        confirmTwoFactorSetup,
         logout,
     };
 }

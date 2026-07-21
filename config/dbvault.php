@@ -388,11 +388,16 @@ return [
     | Two-Factor Authentication
     |--------------------------------------------------------------------------
     |
+    | - require: when true, EVERY vault user must use 2FA. Users who have not
+    |   yet enrolled are force-enrolled at login (shown a QR + recovery codes,
+    |   must confirm one TOTP code before the session is granted) — so turning
+    |   this on never locks anyone out. Default false (opt-in per user).
     | - issuer: the label shown in authenticator apps next to the account.
     | - email_otp_ttl: minutes an emailed one-time code remains valid.
     |
     */
     'two_factor' => [
+        'require' => (bool) env('DBVAULT_REQUIRE_2FA', false),
         'issuer' => env('DBVAULT_2FA_ISSUER', 'DB Vault'),
         'email_otp_ttl' => (int) env('DBVAULT_EMAIL_OTP_TTL', 10),
     ],

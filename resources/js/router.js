@@ -16,6 +16,12 @@ const routes = [
         meta: { guestOnly: true },
     },
     {
+        path: '/two-factor-setup',
+        name: 'two-factor-setup',
+        component: () => import('./Views/Auth/TwoFactorSetup.vue'),
+        meta: { guestOnly: true },
+    },
+    {
         path: '/',
         name: 'dashboard',
         component: () => import('./Views/Dashboard.vue'),

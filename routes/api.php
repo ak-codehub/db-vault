@@ -33,6 +33,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('login', [AuthController::class, 'login'])->name('login');
 Route::post('two-factor-challenge', [AuthController::class, 'twoFactorChallenge'])->name('two-factor-challenge');
+// Confirm a forced enrollment (2FA required, user not yet enrolled). Sits
+// outside vault.auth for the same reason as login: no session exists yet.
+Route::post('two-factor-setup', [AuthController::class, 'confirmTwoFactorSetup'])->name('two-factor-setup');
 
 Route::middleware(['vault.auth', 'vault.gate'])->group(function (): void {
     Route::post('logout', [AuthController::class, 'logout'])->name('logout');

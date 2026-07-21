@@ -82,6 +82,9 @@ export const authApi = {
     twoFactorChallenge: (payload) => unwrap(apiClient.post('two-factor-challenge', payload)),
     // {code | recovery_code} -> {status:'authenticated', user}
 
+    twoFactorSetup: (payload) => unwrap(apiClient.post('two-factor-setup', payload)),
+    // {code} -> {status:'authenticated', user} — confirms a forced enrollment
+
     logout: () => unwrap(apiClient.post('logout')),
 
     me: () => unwrap(apiClient.get('me')),

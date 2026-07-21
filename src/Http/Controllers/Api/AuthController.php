@@ -40,6 +40,13 @@ class AuthController extends Controller
      */
     private const TWO_FACTOR_SESSION_KEY = 'db-vault.two-factor.id';
 
+    /**
+     * Session keys holding a pending, not-yet-persisted enrollment (secret +
+     * recovery codes) between the credential step and setup confirmation, used
+     * when 2FA is required but the user has not enrolled yet.
+     */
+    private const SETUP_SESSION_KEY = 'db-vault.two-factor.setup';
+
     public function login(Request $request, TwoFactorService $twoFactor, ActivityLogger $logger): JsonResponse
     {
         $validated = $request->validate([
@@ -65,7 +72,60 @@ class AuthController extends Controller
             return response()->json(['status' => 'two-factor-required']);
         }
 
+        // 2FA is required for everyone but this user hasn't enrolled: hand back
+        // a fresh secret + recovery codes and make them confirm a TOTP code
+        // before the session is granted. Nothing is persisted or logged in
+        // until confirmTwoFactorSetup() succeeds — so no lockout, no bypass.
+        if ((bool) config('dbvault.two_factor.require', false)) {
+            $secret = $twoFactor->generateSecretKey();
+            $recoveryCodes = $twoFactor->generateRecoveryCodes();
+
+            $request->session()->put(self::SETUP_SESSION_KEY, [
+                'id' => $user->id,
+                'secret' => $secret,
+                'recovery_codes' => $recoveryCodes,
+            ]);
+
+            return response()->json([
+                'status' => 'two-factor-setup-required',
+                'qr' => $twoFactor->qrCodeSvg($user, $secret),
+                'secret' => $secret,
+                'recovery_codes' => $recoveryCodes,
+            ]);
+        }
+
         return $this->completeLogin($request, $user, $logger);
+    }
+
+    /**
+     * Complete a forced enrollment: the user scanned the QR returned by
+     * login() and submits a TOTP code from their authenticator. On success the
+     * secret + recovery codes are persisted (2FA now enabled) and the session
+     * is granted. The pending secret lives only in the session until here.
+     */
+    public function confirmTwoFactorSetup(Request $request, TwoFactorService $twoFactor, ActivityLogger $logger): JsonResponse
+    {
+        $validated = $request->validate([
+            'code' => ['required', 'string'],
+        ]);
+
+        $pending = $request->session()->get(self::SETUP_SESSION_KEY);
+
+        if (! is_array($pending) || empty($pending['id']) || ! ($user = User::find($pending['id']))) {
+            return response()->json(['message' => 'No two-factor setup is in progress.'], 419);
+        }
+
+        if (! $twoFactor->verifyTotpAgainstSecret((string) $pending['secret'], $validated['code'])) {
+            throw ValidationException::withMessages([
+                'code' => ['That code did not match. Scan the QR again and enter a fresh code.'],
+            ]);
+        }
+
+        $twoFactor->confirmEnrollment($user, (string) $pending['secret'], (array) $pending['recovery_codes']);
+        $request->session()->forget(self::SETUP_SESSION_KEY);
+        $logger->log($user, 'auth.2fa_enrolled', $user);
+
+        return $this->completeLogin($request, $user, $logger, ['via' => 'two-factor-setup']);
     }
 
     public function twoFactorChallenge(Request $request, TwoFactorService $twoFactor, ActivityLogger $logger): JsonResponse

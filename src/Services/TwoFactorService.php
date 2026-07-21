@@ -84,6 +84,33 @@ class TwoFactorService
     }
 
     /**
+     * Verify a TOTP $code against a not-yet-persisted $secret (during
+     * enrollment) — used before the secret is stored, so verifyTotp() (which
+     * reads the stored secret) cannot be used yet.
+     */
+    public function verifyTotpAgainstSecret(string $secret, string $code): bool
+    {
+        return $this->google2fa->verifyKey($secret, $code);
+    }
+
+    /**
+     * Persist a confirmed enrollment: encrypt and store the TOTP secret and
+     * recovery codes, and stamp two_factor_confirmed_at so
+     * hasEnabledTwoFactorAuthentication() becomes true. The caller must have
+     * already verified a live TOTP code against $secret.
+     *
+     * @param  list<string>  $recoveryCodes
+     */
+    public function confirmEnrollment(User $user, string $secret, array $recoveryCodes): void
+    {
+        $user->forceFill([
+            'two_factor_secret' => Crypt::encryptString($secret),
+            'two_factor_recovery_codes' => Crypt::encryptString(json_encode(array_values($recoveryCodes))),
+            'two_factor_confirmed_at' => now(),
+        ])->save();
+    }
+
+    /**
      * Verify a recovery code and, if valid, remove it from the user's
      * remaining set so it cannot be reused.
      */

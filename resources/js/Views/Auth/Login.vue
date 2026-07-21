@@ -26,6 +26,8 @@ async function submit() {
         const data = await login({ email: form.email, password: form.password, remember: form.remember });
         if (data.status === 'two-factor-required') {
             router.push({ name: 'two-factor', query: { email: form.email, redirect: route.query.redirect } });
+        } else if (data.status === 'two-factor-setup-required') {
+            router.push({ name: 'two-factor-setup', query: { email: form.email, redirect: route.query.redirect } });
         } else if (data.status === 'authenticated') {
             router.push(route.query.redirect ?? { name: 'dashboard' });
         }
